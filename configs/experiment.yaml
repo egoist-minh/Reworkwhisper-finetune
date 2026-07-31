@@ -6,9 +6,9 @@ base_model: vinai/PhoWhisper-small    # small = runs locally on CPU. Swap to -la
 seed: 42
 
 data:
-  # Points at the predecessor repo for the first run -- read-only, and it is a config
-  # value, not a code path, so copying the dataset is not on the critical path.
-  dataset_path: D:/phowhisper-finetune-exp/dataset/paid-dataset
+  # Migrated into this repo 2026-07-31 (dataset/CHECKSUMS.txt proves identical bytes to
+  # the predecessor repo's copy). No longer depends on D:/phowhisper-finetune-exp.
+  dataset_path: dataset/paid-dataset
   ood_eval_path: null                 # set once scripts/fetch_vivos.py has written it
   # Ingested 2026-07-31 via scripts/ingest_real_bench.py from D:/phowhisper-finetune-exp/
   # dataset/done/ (264 segments after re-segmenting the 20 that exceeded 30s). Tier 4a

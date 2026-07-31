@@ -1,6 +1,7 @@
-"""Tests for src/data.py. Reads the predecessor repo's paid-dataset read-only
-(CLAUDE.md: never edit it) to check split resolution against the numbers
-verified in the handoff: 1316 train / 250 val / 236 test, 1802 total."""
+"""Tests for src/data.py. Reads the migrated paid-dataset (dataset/paid-dataset,
+verified identical to the predecessor repo's copy via dataset/CHECKSUMS.txt) to
+check split resolution against the numbers verified in the handoff: 1316
+train / 250 val / 236 test, 1802 total."""
 
 from pathlib import Path
 
@@ -8,11 +9,11 @@ import pytest
 
 from src.data import load_manifests, resolve_splits, split_stats, load_audio_16k
 
-PAID_DATASET = Path("D:/phowhisper-finetune-exp/dataset/paid-dataset")
+PAID_DATASET = Path("dataset/paid-dataset")
 VAL_MEETINGS = ["paid_meeting_0001", "paid_meeting_0002", "paid_meeting_0011"]
 
 pytestmark = pytest.mark.skipif(
-    not PAID_DATASET.exists(), reason="predecessor repo not present on this machine"
+    not PAID_DATASET.exists(), reason="dataset/paid-dataset not present on this machine"
 )
 
 

@@ -33,12 +33,15 @@ moved from deferred to required). Do not re-litigate without user sign-off:
   documented but unbuilt path.
 - **Only `paid-dataset` is used.** `unpaid-dataset` and `dataset_by_task` are explicitly
   out of scope for this deadline (confirmed by the user) — do not profile or wire them in.
-- **Dataset is NOT migrated into `Fine_tune_wf/dataset/`.** `data.dataset_path` points
-  straight at `D:/phowhisper-finetune-exp/dataset/paid-dataset` (read-only) — copying it
-  is not on the critical path per CLAUDE.md. Getting the same bytes onto Kaggle is a Track
-  B launcher concern (upload as a Kaggle Dataset attachment), not a Track A migration.
-  (`dataset/real-meetings-bench/` is the one exception — it's generated fresh by A2b, not
-  copied wholesale, and is small enough to attach directly.)
+- **`paid-dataset` IS migrated into `Fine_tune_wf/dataset/`** (reversed 2026-07-31 — the
+  first pass deferred this as "not on the critical path"; the user asked for it directly).
+  `data.dataset_path: dataset/paid-dataset`, 2.0 GB, checksum-verified identical to the
+  predecessor repo's copy via `scripts/checksum_dataset.py` → `dataset/CHECKSUMS.txt`
+  (2,237 files covering both `paid-dataset` and `real-meetings-bench`; the only file
+  under `dataset/` tracked in git). Getting these same bytes onto Kaggle is still a Track
+  B concern (zip + attach as a Kaggle Dataset, then verify with `checksum_dataset.py
+  --mode verify` before trusting the mounted copy) — the point of CHECKSUMS.txt is
+  proving *that* step didn't corrupt anything, not avoiding the copy.
 - **The pipeline must actually push and persist evidence, not just print numbers**
   (confirmed by the user). `src/hub.py:push_adapter` is built and wired into
   `pipeline.py`'s `sweep-gate` stage (fires only on `overall_pass` and `hub.push: true`).
@@ -66,7 +69,7 @@ splitting them out further does not buy back any Kaggle queue time before the de
 
 | # | Session | Env | Depends on | Output | Acceptance | Status |
 |---|---------|-----|-----------|--------|------------|--------|
-| **A1** | **Bootstrap** — `git init`, `.gitignore`, `requirements.txt`, `src/__init__.py`, GitHub remote | CPU | none | repo initialized + pushed | `git status` clean; `configs/experiment.yaml` has no path back that breaks on another machine except `data.dataset_path` itself | **done** — repo live at `github.com/egoist-minh/Reworkwhisper-finetune` (private), initial commit pushed to `main` |
+| **A1** | **Bootstrap** — `git init`, `.gitignore`, `requirements.txt`, `src/__init__.py`, GitHub remote, migrate `paid-dataset` + `dataset/CHECKSUMS.txt` | CPU | none | repo initialized + pushed, `dataset/paid-dataset/` (2.0 GB, gitignored) + `dataset/CHECKSUMS.txt` (tracked) | `git status` clean; `configs/experiment.yaml` has no path back to `D:/phowhisper-finetune-exp`; `scripts/checksum_dataset.py --mode verify` passes | **done** — repo live at `github.com/egoist-minh/Reworkwhisper-finetune` (private). `paid-dataset` copied in 2026-07-31, checksum-verified byte-identical to the source (spot-checked one file's sha256 by hand too), split resolution re-confirmed against the local copy: 1316/250/236 |
 | **A3** | **Config schema** — `src/config.py`, `configs/experiment.yaml` | CPU | A1 | `src/config.py`, `configs/experiment.yaml` | Loads YAML → validated dataclass; rejects unknown keys, bad rank/alpha, lexical filler tokens, tier-4 leak, empty sweep grid | **done** (validated by hand via `python -c`); `tests/test_config.py` **not yet written** — `todo`, do before trusting further config edits |
 | **A4** | **Data module** — `src/data.py`: manifest merge, split resolution, 24k→16k resample | CPU | A1, A3 | `src/data.py`, `tests/test_data.py` | Validates real `paid-dataset` manifests: **1316/250/236** train/val/test (corrected from an earlier wrong 1566/250/236 note — verified live, see handoff), val meetings resolve to `[0001, 0002, 0011]`, meeting_id conflict raises | **done** — 4 tests pass against the real predecessor dataset (read-only) |
 | **A5** | **Normalization + metrics** — `src/normalize.py` (§6 Stage 4 contract, word→digit), `src/metrics.py` (Levenshtein, CER/WER, bootstrap CI, paired delta CI) | CPU | A1 | `src/normalize.py`, `src/metrics.py`, `tests/test_normalize.py` | word→digit correct on the arithmetic/digit-string cases incl. the `hai ba nghìn`→`23000` bug fixed this session; symmetric normalization verified; CER/WER corpus-level, not per-segment mean; delta CI paired | **done** — 9 tests pass. `code-switch tagging` (syllable-shape regex) and `measure_rtf()` **not built** — deferred, not needed for tiers 1/2/4a |
