@@ -1,0 +1,19 @@
+# Deliberately small. Every import here is a version that can shift under us on Kaggle,
+# so anything implementable in ~50 lines is implemented instead of imported:
+#   jiwer    -> src/metrics.py    (hand-rolled Levenshtein)
+#   pydantic -> src/config.py     (dataclasses)
+#   datasets -> scripts/          (parquet read via pyarrow; datasets 5.0 dropped scripts)
+
+pyyaml
+numpy
+scipy              # resample_poly: dataset is 24 kHz, Whisper needs 16 kHz
+soundfile
+pyarrow            # VIVOS refs/convert/parquet branch
+huggingface_hub
+torch
+transformers
+peft
+accelerate         # transitive via Trainer, pinned here so it is visible
+
+# Dev
+pytest

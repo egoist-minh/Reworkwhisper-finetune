@@ -1,0 +1,8 @@
+# git can't re-include a file whose parent dir is excluded, so exclude the
+# CONTENTS of dataset/ instead of the directory itself.
+dataset/*
+!dataset/CHECKSUMS.txt
+outputs/
+__pycache__/
+*.pyc
+.pytest_cache/

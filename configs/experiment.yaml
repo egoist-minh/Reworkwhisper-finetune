@@ -1,0 +1,65 @@
+# Active config. Edit this, never hardcode in src/.
+# Resolved copy is frozen to outputs/{run_id}/config.json -- that is what stages read.
+
+run_id: baseline-v0
+base_model: vinai/PhoWhisper-small    # small = runs locally on CPU. Swap to -large on GPU.
+seed: 42
+
+data:
+  # Points at the predecessor repo for the first run -- read-only, and it is a config
+  # value, not a code path, so copying the dataset is not on the critical path.
+  dataset_path: D:/phowhisper-finetune-exp/dataset/paid-dataset
+  ood_eval_path: null                 # set once scripts/fetch_vivos.py has written it
+  real_bench_path: null               # done/ ingested later (PROJECT_CORE §4)
+  real_clip_path: null                # optional; null = skip
+  # split=demo is 1566 segments; these meetings are carved out of it as val,
+  # leaving 1316 train / 250 val / 236 test. Verified 2026-07-31.
+  val_meetings: [paid_meeting_0001, paid_meeting_0002, paid_meeting_0011]
+
+# Scoring normalization -- applied identically to hypothesis AND reference.
+# PROJECT_CORE.md §6 Stage 4. Never applied to training targets.
+normalization:
+  strip_punctuation: true
+  lowercase: true
+  number_convention: word_to_digit    # symmetric; audited via conversions counter
+  audit_conversions: true
+  filler_tokens: [ừm, ờm, ehm, uhm, hmm]   # ạ/à/ừ/ơ/dạ/vâng are lexical -- never here
+
+eval:
+  split: test
+  limit: 20                           # null = all segments
+  batch_size: 8                       # weights load fp16 for eval: 3.1 GiB, room to raise
+  num_beams: 1
+  language: vi
+
+lora:
+  rank: 16                            # 1.76% trainable on large (28.8M / 1.64B), measured
+  alpha: 32
+  target_modules: [q_proj, k_proj, v_proj, out_proj, fc1, fc2]
+  dropout: 0.05
+  use_rslora: true                    # scaling = alpha/sqrt(rank)
+  min_retained_energy: 0.99           # Path B (full_finetune) SVD guard only
+
+training:
+  learning_rate: 2.0e-4
+  epochs: 3
+  batch_size: 8                       # T4 peak 9.75 GiB measured; 4 -> 8.05, 2 -> 7.21
+  grad_accum_steps: 2
+  warmup_ratio: 0.1
+  full_finetune: false
+  gradient_checkpointing: true
+
+sweep:
+  lambdas: [0.0, 0.25, 0.5, 0.75, 1.0]
+  ood_cer_budget: 0.02                # hard budget; no lambda within it => fail, no fallback
+
+# Eval gate thresholds -- only tiers 1, 2, 4a are in scope for the first run.
+# Tier 3 (RTF) dropped, tier 4b (long-form) deferred (deadline scope cut).
+gates:
+  min_improvement_pct: 10.0           # tier 1: CER_test <= 0.9 * CER_base
+  real_cer_regression_pp: 0.0         # tier 4a: CER_real must not regress vs base
+
+hub:
+  push: false
+  repo_id: null
+  private: true
