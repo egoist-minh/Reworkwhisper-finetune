@@ -10,7 +10,10 @@ data:
   # value, not a code path, so copying the dataset is not on the critical path.
   dataset_path: D:/phowhisper-finetune-exp/dataset/paid-dataset
   ood_eval_path: null                 # set once scripts/fetch_vivos.py has written it
-  real_bench_path: null               # done/ ingested later (PROJECT_CORE §4)
+  # Ingested 2026-07-31 via scripts/ingest_real_bench.py from D:/phowhisper-finetune-exp/
+  # dataset/done/ (264 segments after re-segmenting the 20 that exceeded 30s). Tier 4a
+  # is in scope for this deadline -- not optional.
+  real_bench_path: dataset/real-meetings-bench
   real_clip_path: null                # optional; null = skip
   # split=demo is 1566 segments; these meetings are carved out of it as val,
   # leaving 1316 train / 250 val / 236 test. Verified 2026-07-31.

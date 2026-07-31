@@ -64,7 +64,7 @@ def stage_baseline(cfg) -> Path:
     from src.data import (load_manifests, resolve_splits, split_stats,
                            write_validated_manifest, ManifestDataset)
     from src.asr import load_for_eval
-    from src.gate import _eval_split
+    from src.gate import _eval_split, write_predictions
 
     out = cfg.out_dir
     freeze(cfg, out / "config.json")
@@ -86,20 +86,24 @@ def stage_baseline(cfg) -> Path:
     ds = ManifestDataset(records=resolved, audio_root=Path(cfg.data.dataset_path) / "audio")
     model, processor = load_for_eval(cfg.base_model)
 
-    baseline = {"cer_test": _eval_split(model, processor, ds.filter_split("test"),
-                                        normalizer, cfg.eval)["cer"]}
+    def _eval_and_record(name: str, dataset) -> float:
+        result = _eval_split(model, processor, dataset, normalizer, cfg.eval)
+        write_predictions(result.pop("_predictions"), out / "audit" / f"predictions_baseline_{name}.csv")
+        return result["cer"]
+
+    baseline = {"cer_test": _eval_and_record("test", ds.filter_split("test"))}
     if cfg.data.ood_eval_path:
         from src.data import load_manifests as load_ood
         ood_records = load_ood(cfg.data.ood_eval_path)
         ood_ds = ManifestDataset(records=ood_records,
                                   audio_root=Path(cfg.data.ood_eval_path) / "audio")
-        baseline["cer_ood"] = _eval_split(model, processor, ood_ds, normalizer, cfg.eval)["cer"]
+        baseline["cer_ood"] = _eval_and_record("ood", ood_ds)
     if cfg.data.real_bench_path:
         from src.data import load_manifests as load_real
         real_records = load_real(cfg.data.real_bench_path)
         real_ds = ManifestDataset(records=real_records,
                                    audio_root=Path(cfg.data.real_bench_path) / "audio")
-        baseline["cer_real"] = _eval_split(model, processor, real_ds, normalizer, cfg.eval)["cer"]
+        baseline["cer_real"] = _eval_and_record("real", real_ds)
 
     baseline_path = out / "metrics" / "baseline.json"
     baseline_path.write_text(json.dumps(baseline, indent=2), encoding="utf-8")
@@ -202,7 +206,9 @@ def stage_sweep_gate(cfg) -> Path:
 
     if results["overall_pass"] and cfg.hub.push:
         from src.hub import push_adapter
-        push_adapter(adapter_dir, cfg.hub.repo_id, private=cfg.hub.private)
+        url = push_adapter(adapter_dir, cfg.hub.repo_id, private=cfg.hub.private,
+                            gate_results=json.loads(gate_path.read_text(encoding="utf-8")))
+        print(f"pushed adapter to {url}")
 
     _write_state(out, "sweep-gate")
     return gate_path
