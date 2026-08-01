@@ -68,6 +68,12 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
     processor = WhisperProcessor.from_pretrained(cfg.base_model)
     model = get_peft_model(base_model, build_lora_config(cfg))
     model.print_trainable_parameters()
+    if cfg.training.gradient_checkpointing:
+        # Base model is entirely frozen except the adapter, so the graph's input
+        # tensor has requires_grad=False -- gradient checkpointing then breaks
+        # backprop ("element 0 of tensors does not require grad and does not
+        # have a grad_fn") unless this is called. Standard PEFT + Trainer gotcha.
+        model.enable_input_require_grads()
 
     normalizer = Normalizer(
         strip_punctuation=cfg.normalization.strip_punctuation,
@@ -94,6 +100,12 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
         greater_is_better=False,
         load_best_model_at_end=True,
         report_to=[],
+        # ManifestDataset is a plain Dataset, not datasets.Dataset -- Trainer's default
+        # column-removal wraps the *collator* in that case and strips any key not in
+        # WhisperForConditionalGeneration.forward's signature (audio, text, segment_id,
+        # meeting_id all get dropped) before WhisperCollator ever sees the batch. Caught
+        # live on Kaggle as `KeyError: 'audio'` inside WhisperCollator.
+        remove_unused_columns=False,
     )
 
     trainer = Seq2SeqTrainer(
