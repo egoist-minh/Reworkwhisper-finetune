@@ -100,6 +100,11 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
         greater_is_better=False,
         load_best_model_at_end=True,
         report_to=[],
+        # Trainer auto-disables tqdm when the transformers logger's effective level is
+        # above WARNING (see pipeline.py's _quiet_known_noise, which raises it to ERROR
+        # to cut unrelated warning spam) -- force it back on so progress is still visible;
+        # a silently "hung" vs. slow-but-progressing run is not something to guess at.
+        disable_tqdm=False,
         # ManifestDataset is a plain Dataset, not datasets.Dataset -- Trainer's default
         # column-removal wraps the *collator* in that case and strips any key not in
         # WhisperForConditionalGeneration.forward's signature (audio, text, segment_id,
