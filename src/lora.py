@@ -88,7 +88,8 @@ def _verify_saved_adapter(model, saved_dir: Path, tol: float) -> None:
     from peft import PeftModel
 
     device = next(model.parameters()).device
-    dummy = torch.zeros(1, model.config.num_mel_bins, 3000, device=device)
+    dtype = next(model.parameters()).dtype
+    dummy = torch.zeros(1, model.config.num_mel_bins, 3000, device=device, dtype=dtype)
     decoder_ids = torch.tensor([[model.config.decoder_start_token_id]], device=device)
 
     model.eval()
