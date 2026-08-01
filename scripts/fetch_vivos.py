@@ -33,6 +33,11 @@ from pathlib import Path
 
 REPO_ID = "AILAB-VNUHCM/vivos"
 PARQUET_REV = "refs/convert/parquet"
+# Must match src/data.py:load_manifests's glob "manifest.*.jsonl" -- a bare
+# "manifest.jsonl" does NOT match that pattern (the glob requires a non-empty
+# middle component), which is exactly the bug that crashed stage_baseline's
+# load_ood() on the first real Kaggle run.
+MANIFEST_FILENAME = "manifest.vivos.jsonl"
 
 
 def _find_audio_text_columns(table) -> tuple[str, str]:
@@ -71,7 +76,7 @@ def _from_parquet(out_dir: Path, split: str, limit: int | None) -> int:
     audio_dir.mkdir(parents=True, exist_ok=True)
     n = min(limit, table.num_rows) if limit else table.num_rows
 
-    manifest_path = out_dir / "manifest.jsonl"
+    manifest_path = out_dir / MANIFEST_FILENAME
     with open(manifest_path, "w", encoding="utf-8") as mf:
         for i in range(n):
             row_audio = table.column(audio_col)[i].as_py()
@@ -110,7 +115,7 @@ def _from_tarball(out_dir: Path, split: str, limit: int | None) -> int:
     audio_dir.mkdir(parents=True, exist_ok=True)
     waves_root = work / "vivos" / split / "waves"
 
-    manifest_path = out_dir / "manifest.jsonl"
+    manifest_path = out_dir / MANIFEST_FILENAME
     n = 0
     with open(manifest_path, "w", encoding="utf-8") as mf:
         for line in lines:
@@ -143,7 +148,7 @@ def fetch(out_dir: Path, split: str = "test", limit: int | None = None) -> Path:
         print(f"parquet route failed ({type(e).__name__}: {e}); falling back to tarball")
         n = _from_tarball(out_dir, split, limit)
         print(f"tarball route: wrote {n} segments")
-    return out_dir / "manifest.jsonl"
+    return out_dir / MANIFEST_FILENAME
 
 
 if __name__ == "__main__":
