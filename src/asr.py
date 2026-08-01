@@ -63,6 +63,6 @@ def transcribe_batch(model, processor, audios: list[np.ndarray], language: str =
         inputs = processor(chunk, sampling_rate=16000, return_tensors="pt")
         features = inputs.input_features.to(device=device, dtype=dtype)
         with torch.no_grad():
-            ids = model.generate(features, forced_decoder_ids=forced_ids, num_beams=num_beams)
+            ids = model.generate(input_features=features, forced_decoder_ids=forced_ids, num_beams=num_beams)
         hyps.extend(processor.batch_decode(ids, skip_special_tokens=True))
     return hyps
