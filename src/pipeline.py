@@ -247,6 +247,9 @@ def main() -> None:
     args = ap.parse_args()
 
     cfg = load(args.config, overrides=args.override)
+    from src import compat
+    compat.apply()  # must run before any peft import -- see compat.py
+
     try:
         STAGES[args.stage](cfg)
     except Exception:
