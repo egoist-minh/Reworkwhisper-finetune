@@ -5,9 +5,11 @@ train / 250 val / 236 test, 1802 total."""
 
 from pathlib import Path
 
+import numpy as np
 import pytest
+import soundfile as sf
 
-from src.data import load_manifests, resolve_splits, split_stats, load_audio_16k
+from src.data import load_manifests, resolve_splits, split_stats, load_audio_16k, ManifestDataset
 
 PAID_DATASET = Path("dataset/paid-dataset")
 VAL_MEETINGS = ["paid_meeting_0001", "paid_meeting_0002", "paid_meeting_0011"]
@@ -49,3 +51,15 @@ def test_load_audio_16k_resamples_from_24k():
     audio = load_audio_16k(wav)
     assert audio.ndim == 1
     assert audio.dtype.name == "float32"
+
+
+def test_manifest_dataset_getitem_without_meeting_id(tmp_path):
+    """Regression: crashed on VIVOS records (fetch_vivos.py has no meeting_id/
+    segment_id fields, unlike paid-dataset) with KeyError: 'meeting_id'."""
+    sf.write(tmp_path / "a.wav", np.zeros(1600, dtype="float32"), 16000)
+    ds = ManifestDataset(records=[{"audio_filepath": "a.wav", "text": "hi"}],
+                          audio_root=tmp_path)
+    item = ds[0]
+    assert item["meeting_id"] is None
+    assert item["segment_id"] is None
+    assert item["text"] == "hi"

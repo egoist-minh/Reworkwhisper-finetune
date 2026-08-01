@@ -116,7 +116,7 @@ class ManifestDataset:
         r = self.records[idx]
         audio = load_audio_16k(self.audio_root / r["audio_filepath"])
         return {"audio": audio, "sampling_rate": TARGET_SR, "text": r["text"],
-                "segment_id": r["segment_id"], "meeting_id": r["meeting_id"]}
+                "segment_id": r.get("segment_id"), "meeting_id": r.get("meeting_id")}
 
     def filter_split(self, split: str) -> "ManifestDataset":
         return ManifestDataset(
