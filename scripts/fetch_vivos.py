@@ -7,10 +7,12 @@ through `huggingface_hub` + `pyarrow` (primary) or a raw tarball (fallback).
 
 Primary route: the repo's `refs/convert/parquet` revision, confirmed present
 on 2026-07-31 (files: default/test/0000.parquet, default/train/*.parquet).
-Column names are NOT hardcoded -- HF's auto-conversion schema has not been
-observed directly in this repo, so the audio/text columns are detected by
-shape (an audio column is a struct with a `bytes` sub-field) rather than by
-assumed name. See ~/.claude memory `kaggle-code-never-works-first-try`.
+Schema confirmed on Kaggle 2026-08-01: columns are
+`speaker_id, path, audio, sentence` (audio is a struct with `bytes`/`path`
+sub-fields). Column names are hardcoded below -- an earlier "detect by shape"
+heuristic picked `speaker_id` as the text column (it was the first
+string-typed column in schema order), which is wrong; the real transcript
+column is `sentence`. See ~/.claude memory `kaggle-code-never-works-first-try`.
 
 Fallback route: the repo's default (script) revision ships raw files
 `data/vivos.tar.gz` + `data/prompts-test.txt.gz` (confirmed present
@@ -38,25 +40,9 @@ PARQUET_REV = "refs/convert/parquet"
 # middle component), which is exactly the bug that crashed stage_baseline's
 # load_ood() on the first real Kaggle run.
 MANIFEST_FILENAME = "manifest.vivos.jsonl"
-
-
-def _find_audio_text_columns(table) -> tuple[str, str]:
-    """Detect the audio struct column and the text column by shape, not name."""
-    audio_col = text_col = None
-    for name in table.column_names:
-        field = table.schema.field(name)
-        t = field.type
-        if str(t.__class__.__name__) == "StructType" or (
-            hasattr(t, "names") and "bytes" in getattr(t, "names", [])
-        ):
-            audio_col = name
-        elif str(t) in ("string", "large_string"):
-            text_col = text_col or name
-    if audio_col is None or text_col is None:
-        raise RuntimeError(
-            f"could not detect audio/text columns from schema: {table.schema}"
-        )
-    return audio_col, text_col
+# Confirmed via table.schema on Kaggle 2026-08-01 (parquet revision above).
+AUDIO_COLUMN = "audio"
+TEXT_COLUMN = "sentence"
 
 
 def _from_parquet(out_dir: Path, split: str, limit: int | None) -> int:
@@ -69,8 +55,6 @@ def _from_parquet(out_dir: Path, split: str, limit: int | None) -> int:
     remote = f"default/{split}/0000.parquet"
     local = hf_hub_download(REPO_ID, remote, repo_type="dataset", revision=PARQUET_REV)
     table = pq.read_table(local)
-    audio_col, text_col = _find_audio_text_columns(table)
-    print(f"detected columns: audio={audio_col!r} text={text_col!r}")
 
     audio_dir = out_dir / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
@@ -79,8 +63,8 @@ def _from_parquet(out_dir: Path, split: str, limit: int | None) -> int:
     manifest_path = out_dir / MANIFEST_FILENAME
     with open(manifest_path, "w", encoding="utf-8") as mf:
         for i in range(n):
-            row_audio = table.column(audio_col)[i].as_py()
-            text = table.column(text_col)[i].as_py()
+            row_audio = table.column(AUDIO_COLUMN)[i].as_py()
+            text = table.column(TEXT_COLUMN)[i].as_py()
             audio_bytes = row_audio["bytes"]
             wav_name = f"vivos_{split}_{i:05d}.wav"
             data, sr = sf.read(io.BytesIO(audio_bytes))
