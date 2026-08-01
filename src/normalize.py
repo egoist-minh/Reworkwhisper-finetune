@@ -83,8 +83,12 @@ def words_to_digits(text: str) -> tuple[str, int]:
             while j < len(toks) and toks[j] in _NUMWORDS:
                 j += 1
             run = toks[i:j]
-            # strip trailing filler-only words so "năm linh" does not eat the linh
-            while run and run[-1] in _ZERO_FILLER:
+            # strip trailing filler-only words so "năm linh" does not eat the linh --
+            # only while more than one token remains, so a lone filler word (e.g. the
+            # name "Linh") falls through to the `skip` branch below instead of being
+            # stripped down to an empty run, which left `i` stuck at the same index
+            # forever (infinite loop, hit on real Kaggle data 2026-08-01).
+            while len(run) > 1 and run[-1] in _ZERO_FILLER:
                 j -= 1
                 run = run[:-1]
             skip = len(run) == 1 and run[0] in _ZERO_FILLER | {"không"}
