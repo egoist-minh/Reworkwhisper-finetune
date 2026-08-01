@@ -133,7 +133,11 @@ def stage_train(cfg) -> Path:
         ood_ds = ManifestDataset(records=ood_records,
                                   audio_root=Path(cfg.data.ood_eval_path) / "audio")
 
-    base_model = WhisperForConditionalGeneration.from_pretrained(cfg.base_model)
+    # use_safetensors=False skips transformers' auto-conversion probe, which
+    # otherwise spawns a background thread that hits HF's discussions API to
+    # check for an existing conversion PR -- 403s (PhoWhisper-small has
+    # discussions disabled) and dumps a harmless but noisy traceback every run.
+    base_model = WhisperForConditionalGeneration.from_pretrained(cfg.base_model, use_safetensors=False)
     best_dir = run_train(cfg, base_model, train_ds, val_ds, ood_ds, out)
     _write_state(out, "train")
     return best_dir
@@ -239,6 +243,20 @@ STAGES = {
 }
 
 
+def _quiet_known_noise() -> None:
+    """Silence transformers/torch warnings observed to be harmless and
+    repetitive across every stage (deprecation notices, tied-weights/attention-
+    mask/logits-processor advisories) -- cosmetic only, never a correctness
+    signal we rely on. Does not touch exceptions or the compat patch."""
+    import warnings
+
+    from transformers.utils import logging as hf_logging
+
+    hf_logging.set_verbosity_error()
+    warnings.filterwarnings("ignore", message=".*warmup_ratio is deprecated.*")
+    warnings.filterwarnings("ignore", message=".*gather along dimension.*")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="configs/experiment.yaml")
@@ -249,6 +267,7 @@ def main() -> None:
     cfg = load(args.config, overrides=args.override)
     from src import compat
     compat.apply()  # must run before any peft import -- see compat.py
+    _quiet_known_noise()
 
     try:
         STAGES[args.stage](cfg)

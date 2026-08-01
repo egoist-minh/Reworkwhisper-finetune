@@ -32,7 +32,12 @@ def load_for_eval(base_model: str, adapter_dir: str | Path | None = None):
     from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
     dtype = pick_dtype()
-    model = WhisperForConditionalGeneration.from_pretrained(base_model, torch_dtype=dtype)
+    # use_safetensors=False skips transformers' auto-conversion probe (background
+    # thread hitting HF's discussions API, 403s on repos with discussions
+    # disabled -- e.g. PhoWhisper-small -- and prints a noisy but harmless
+    # traceback every call).
+    model = WhisperForConditionalGeneration.from_pretrained(
+        base_model, torch_dtype=dtype, use_safetensors=False)
     processor = WhisperProcessor.from_pretrained(base_model)
 
     if adapter_dir is not None:
