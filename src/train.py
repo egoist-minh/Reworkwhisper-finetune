@@ -104,6 +104,7 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
     import torch
     from transformers import (Seq2SeqTrainer, Seq2SeqTrainingArguments,
                                WhisperProcessor, TrainerCallback)
+    from transformers.trainer_callback import PrinterCallback
     from peft import get_peft_model
 
     from src.lora import build_lora_config
@@ -241,6 +242,9 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
         compute_metrics=_make_compute_metrics(processor, normalizer),
         callbacks=[RobustEvalTrackingCallback(), TrainingDisplayCallback()],
     )
+    # disable_tqdm=True makes Trainer default-add PrinterCallback, which dumps every
+    # log event as a raw dict -- that's the noise TrainingDisplayCallback replaces.
+    trainer.remove_callback(PrinterCallback)
     trainer.train()
 
     if stopping.best is None:

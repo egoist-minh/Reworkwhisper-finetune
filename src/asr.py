@@ -32,10 +32,11 @@ def load_for_eval(base_model: str, adapter_dir: str | Path | None = None):
     from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
     dtype = pick_dtype()
-    # use_safetensors=False skips transformers' auto-conversion probe (background
-    # thread hitting HF's discussions API, 403s on repos with discussions
-    # disabled -- e.g. PhoWhisper-small -- and prints a noisy but harmless
-    # traceback every call).
+    # use_safetensors=False doesn't stop transformers' safetensors auto-conversion
+    # probe thread from firing (403 on repos with discussions disabled, e.g.
+    # PhoWhisper-*) -- the traceback it used to dump is silenced by
+    # compat.silence_hf_discussions_403_noise(). Callers must run compat.apply()
+    # before this (see src/compat.py, src/lora.py).
     model = WhisperForConditionalGeneration.from_pretrained(
         base_model, torch_dtype=dtype, use_safetensors=False)
     processor = WhisperProcessor.from_pretrained(base_model)

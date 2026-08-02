@@ -46,6 +46,29 @@ def neutralize_broken_peft_probes() -> list[str]:
     return broken
 
 
+def silence_hf_discussions_403_noise() -> None:
+    """transformers' safetensors auto-conversion probe runs in a background thread
+    that hits HF's discussions API and 403s on repos with discussions disabled
+    (e.g. PhoWhisper-*). `use_safetensors=False` at the from_pretrained call sites
+    was meant to skip this but does not stop the probe thread from firing anyway
+    (confirmed still noisy on Kaggle with that flag set) -- the 403 is asynchronous
+    and prints from another thread, so try/except at the call site never sees it.
+    Silenced here instead, at the thread-exception-hook level; any other thread
+    exception still goes through the default hook."""
+    import threading
+
+    default_hook = threading.excepthook
+
+    def _hook(args):
+        response = getattr(args.exc_value, "response", None)
+        is_403 = response is not None and getattr(response, "status_code", None) == 403
+        if is_403 and "discussions" in str(getattr(response, "url", "")):
+            return
+        default_hook(args)
+
+    threading.excepthook = _hook
+
+
 def version_table() -> dict[str, str]:
     """Versions of everything that can break us. Dumped on any unhandled exception so
     the cause of a failed GPU run is visible without a second run."""
@@ -67,4 +90,5 @@ def version_table() -> dict[str, str]:
 
 def apply() -> dict:
     """Single entry point. Call once at pipeline start, before building any model."""
+    silence_hf_discussions_403_noise()
     return {"neutralized": neutralize_broken_peft_probes(), "versions": version_table()}

@@ -142,10 +142,10 @@ def stage_train(cfg) -> Path:
         if ood_ds is not None:
             ood_ds = ood_ds.limit(cfg.training.limit)
 
-    # use_safetensors=False skips transformers' auto-conversion probe, which
-    # otherwise spawns a background thread that hits HF's discussions API to
-    # check for an existing conversion PR -- 403s (PhoWhisper-small has
-    # discussions disabled) and dumps a harmless but noisy traceback every run.
+    # use_safetensors=False doesn't stop transformers' safetensors auto-conversion
+    # probe thread from firing (403 on repos with discussions disabled, e.g.
+    # PhoWhisper-*) -- the traceback it used to dump is silenced by
+    # compat.silence_hf_discussions_403_noise(), applied via compat.apply() in main().
     base_model = WhisperForConditionalGeneration.from_pretrained(cfg.base_model, use_safetensors=False)
     best_dir = run_train(cfg, base_model, train_ds, val_ds, ood_ds, out)
     _write_state(out, "train")
