@@ -141,11 +141,10 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
         eval_strategy="epoch",
         save_strategy="epoch",
         report_to=[],
-        # Trainer auto-disables tqdm when the transformers logger's effective level is
-        # above WARNING (see pipeline.py's _quiet_known_noise, which raises it to ERROR
-        # to cut unrelated warning spam) -- force it back on so progress is still visible;
-        # a silently "hung" vs. slow-but-progressing run is not something to guess at.
-        disable_tqdm=False,
+        # HF's own train/eval bars interleave into unreadable noise with a dict-valued
+        # eval_dataset (one bar per split, redrawn on top of each other). Killed in favor
+        # of TrainingDisplayCallback's single bar + table below.
+        disable_tqdm=True,
         # ManifestDataset is a plain Dataset, not datasets.Dataset -- Trainer's default
         # column-removal wraps the *collator* in that case and strips any key not in
         # WhisperForConditionalGeneration.forward's signature (audio, text, segment_id,
@@ -177,6 +176,62 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
                 control.should_training_stop = True
             return control
 
+    class TrainingDisplayCallback(TrainerCallback):
+        """One tqdm bar for the whole run + one table row per eval round (val+ood
+        merged), replacing HF's default per-split bars that redraw on top of each
+        other and the raw metrics-dict prints. `eval_dataset` is {"val":.., "ood":..}
+        (fixed order), so a row is flushed once an `eval_ood_*` key shows up --
+        that's always the second/last on_evaluate call of the round."""
+
+        _ROW_FMT = "{:>7}{:>8}{:>12}{:>10}{:>9}{:>9}{:>10}"
+
+        def __init__(self):
+            self.bar = None
+            self.last_train_loss = None
+            self._pending = {}
+
+        def on_train_begin(self, args, state, control, **kwargs):
+            from tqdm.auto import tqdm
+
+            self.bar = tqdm(total=state.max_steps, desc="train", unit="step")
+            tqdm.write(self._ROW_FMT.format(
+                "Epoch", "Step", "TrainLoss", "ValLoss", "ValCER", "ValWER", "OOD_CER"
+            ))
+
+        def on_log(self, args, state, control, logs=None, **kwargs):
+            if logs and "loss" in logs:
+                self.last_train_loss = logs["loss"]
+                if self.bar is not None:
+                    self.bar.set_postfix(loss=f"{logs['loss']:.3f}")
+
+        def on_step_end(self, args, state, control, **kwargs):
+            if self.bar is not None:
+                self.bar.update(1)
+
+        def on_evaluate(self, args, state, control, metrics=None, model=None, **kwargs):
+            if not metrics:
+                return control
+            self._pending.update(metrics)
+            if not any(k.startswith("eval_ood") for k in metrics):
+                return control
+            row = self._ROW_FMT.format(
+                f"{state.epoch:.1f}",
+                state.global_step,
+                f"{self.last_train_loss:.3f}" if self.last_train_loss is not None else "-",
+                f"{self._pending.get('eval_val_loss', float('nan')):.3f}",
+                f"{self._pending.get('eval_val_cer', float('nan')):.4f}",
+                f"{self._pending.get('eval_val_wer', float('nan')):.4f}",
+                f"{self._pending.get('eval_ood_cer', float('nan')):.4f}",
+            )
+            from tqdm.auto import tqdm
+            tqdm.write(row)
+            self._pending = {}
+            return control
+
+        def on_train_end(self, args, state, control, **kwargs):
+            if self.bar is not None:
+                self.bar.close()
+
     trainer = Seq2SeqTrainer(
         model=model,
         args=args,
@@ -184,7 +239,7 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
         eval_dataset={"val": val_ds, "ood": ood_ds},
         data_collator=WhisperCollator(processor),
         compute_metrics=_make_compute_metrics(processor, normalizer),
-        callbacks=[RobustEvalTrackingCallback()],
+        callbacks=[RobustEvalTrackingCallback(), TrainingDisplayCallback()],
     )
     trainer.train()
 
