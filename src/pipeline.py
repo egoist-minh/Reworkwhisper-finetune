@@ -87,7 +87,7 @@ def stage_baseline(cfg) -> Path:
     model, processor = load_for_eval(cfg.base_model)
 
     def _eval_and_record(name: str, dataset) -> float:
-        result = _eval_split(model, processor, dataset, normalizer, cfg.eval)
+        result = _eval_split(model, processor, dataset, normalizer, cfg.eval, desc=f"baseline:{name}")
         write_predictions(result.pop("_predictions"), out / "audit" / f"predictions_baseline_{name}.csv")
         return result["cer"]
 
@@ -183,8 +183,10 @@ def stage_sweep_gate(cfg) -> Path:
     best_lambda = None
     for lam in cfg.sweep.lambdas:
         set_lambda(model, lam)
-        val_cer = _eval_split(model, processor, val_ds, normalizer, cfg.eval)["cer"]
-        ood_cer = (_eval_split(model, processor, ood_ds, normalizer, cfg.eval)["cer"]
+        val_cer = _eval_split(model, processor, val_ds, normalizer, cfg.eval,
+                               desc=f"sweep:lambda={lam}:val")["cer"]
+        ood_cer = (_eval_split(model, processor, ood_ds, normalizer, cfg.eval,
+                                desc=f"sweep:lambda={lam}:ood")["cer"]
                    if ood_ds is not None else None)
         row = {"lambda": lam, "val_cer": val_cer, "ood_cer": ood_cer}
         sweep_rows.append(row)

@@ -54,17 +54,21 @@ def load_for_eval(base_model: str, adapter_dir: str | Path | None = None):
 
 
 def transcribe_batch(model, processor, audios: list[np.ndarray], language: str = "vi",
-                      num_beams: int = 1, batch_size: int = 8) -> list[str]:
+                      num_beams: int = 1, batch_size: int = 8, desc: str | None = None) -> list[str]:
     """Transcribe `audios` (16 kHz mono float32 arrays) in chunks of `batch_size`.
-    Returns hypotheses in the same order as `audios`."""
+    Returns hypotheses in the same order as `audios`. `desc` labels the progress
+    bar (which split/lambda/tier is decoding) -- eval has no other feedback for
+    what the module docstring calls ~10,700 decodes across a full gate run."""
     import torch
+    from tqdm.auto import tqdm
 
     device = next(model.parameters()).device
     dtype = next(model.parameters()).dtype
     forced_ids = processor.get_decoder_prompt_ids(language=language, task="transcribe")
 
     hyps: list[str] = []
-    for start in range(0, len(audios), batch_size):
+    starts = range(0, len(audios), batch_size)
+    for start in tqdm(starts, desc=desc or "transcribe", unit="batch", leave=False):
         chunk = audios[start:start + batch_size]
         inputs = processor(chunk, sampling_rate=16000, return_tensors="pt")
         features = inputs.input_features.to(device=device, dtype=dtype)

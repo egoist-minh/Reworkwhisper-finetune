@@ -39,16 +39,18 @@ from src.metrics import score, char_counts, bootstrap_ci, bootstrap_delta_ci, ve
 from src.normalize import Normalizer
 
 
-def _eval_split(model, processor, dataset, normalizer, eval_cfg) -> dict:
+def _eval_split(model, processor, dataset, normalizer, eval_cfg, desc: str | None = None) -> dict:
     """Returns the usual score() dict plus `_predictions`: one row per segment
     (segment_id, meeting_id, ref, hyp) so a run's evidence includes what the
-    model actually said, not just the aggregate CER (§0 "Evidence-Based")."""
+    model actually said, not just the aggregate CER (§0 "Evidence-Based").
+    `desc` labels the transcribe_batch progress bar."""
     n = min(len(dataset), eval_cfg.limit) if eval_cfg.limit else len(dataset)
     items = [dataset[i] for i in range(n)]
     audios = [it["audio"] for it in items]
     refs = [normalizer(it["text"]) for it in items]
     hyps_raw = transcribe_batch(model, processor, audios, language=eval_cfg.language,
-                                 num_beams=eval_cfg.num_beams, batch_size=eval_cfg.batch_size)
+                                 num_beams=eval_cfg.num_beams, batch_size=eval_cfg.batch_size,
+                                 desc=desc)
     hyps = [normalizer(h) for h in hyps_raw]
     result = score(refs, hyps)
     result["_predictions"] = [
@@ -96,7 +98,7 @@ def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseli
     results = {}
     predictions = {}
 
-    test_metrics = _eval_split(model, processor, test_ds, normalizer, cfg.eval)
+    test_metrics = _eval_split(model, processor, test_ds, normalizer, cfg.eval, desc="gate:tier1_in_domain")
     predictions["tier1_in_domain"] = test_metrics.pop("_predictions")
     tier1_bound = (1 - cfg.gates.min_improvement_pct / 100) * baseline["cer_test"]
     results["tier1_in_domain"] = {
@@ -104,7 +106,7 @@ def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseli
         "pass": test_metrics["cer"] <= tier1_bound,
     }
 
-    ood_metrics = _eval_split(model, processor, ood_ds, normalizer, cfg.eval)
+    ood_metrics = _eval_split(model, processor, ood_ds, normalizer, cfg.eval, desc="gate:tier2_ood")
     predictions["tier2_ood"] = ood_metrics.pop("_predictions")
     tier2_bound = baseline["cer_ood"] + cfg.sweep.ood_cer_budget
     results["tier2_ood"] = {
@@ -113,7 +115,7 @@ def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseli
     }
 
     if real_ds is not None:
-        real_metrics = _eval_split(model, processor, real_ds, normalizer, cfg.eval)
+        real_metrics = _eval_split(model, processor, real_ds, normalizer, cfg.eval, desc="gate:tier4a_real")
         real_predictions = real_metrics.pop("_predictions")
         predictions["tier4a_real"] = real_predictions
         lo, hi = bootstrap_ci(real_metrics["_char_counts"])
@@ -145,7 +147,8 @@ def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseli
             number_convention=alt_convention,
             filler_tokens=cfg.normalization.filler_tokens,
         )
-        alt_metrics = _eval_split(model, processor, real_ds, alt_normalizer, cfg.eval)
+        alt_metrics = _eval_split(model, processor, real_ds, alt_normalizer, cfg.eval,
+                                   desc="gate:tier4a_real_normcheck")
         results["tier4a_real"]["normalization_check"] = {
             cfg.normalization.number_convention: real_metrics["cer"],
             alt_convention: alt_metrics["cer"],
