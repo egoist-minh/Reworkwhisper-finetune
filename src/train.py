@@ -141,6 +141,9 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
         generation_num_beams=cfg.eval.num_beams,
         eval_strategy="epoch",
         save_strategy="epoch",
+        # Default is 500 -- TrainingDisplayCallback's TrainLoss column would stay
+        # "-" for the whole run on anything under that many steps.
+        logging_steps=1,
         report_to=[],
         # HF's own train/eval bars interleave into unreadable noise with a dict-valued
         # eval_dataset (one bar per split, redrawn on top of each other). Killed in favor
