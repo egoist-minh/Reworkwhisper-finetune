@@ -7,12 +7,36 @@ updating configs/experiment.yaml + PROJECT_CORE.md first.
 
 Any tier FAIL halts the pipeline: no adapter is marked pass, nothing pushed
 to HF (§0 problem 4, "Fail Loudly").
+
+Tier 4a statistical rigor (added 2026-08-02, PROJECT_CORE.md §4 "statistical
+power" + "six properties that limit what tier 4 can claim"): with only ~264
+real-bench segments from 2 recordings, a bare point-estimate CER comparison
+against a zero-tolerance threshold cannot distinguish a real regression from
+sampling noise, and pools two different rooms/speaker-sets into one number.
+Three additions address this, all using data already produced by the
+baseline/gate stages -- no new real audio needed:
+  - `by_meeting`: CER broken out per real-bench recording, so a regression
+    concentrated in one room isn't hidden by averaging with the other.
+  - `delta_ci` / `verdict`: a PAIRED bootstrap (`bootstrap_delta_ci`) between
+    baseline and candidate on the identical segments, tighter than treating
+    the two CERs as independent draws, plus the already-written but
+    previously-unused `verdict()` classifying the result as
+    IMPROVED/REGRESSED/INCONCLUSIVE instead of a threshold-only pass/fail.
+    Requires `baseline_real_csv` (baseline stage's
+    `audit/predictions_baseline_real.csv`) so both sides score the same
+    segments in the same order.
+  - `normalization_check`: rescoring under the opposite number convention
+    (word-to-digit vs as-written) to surface whether a result is
+    normalization-dominated rather than model-dominated (§6 "convention-
+    sensitivity check", previously spec'd but not built). Diagnostic only --
+    does not affect `pass`/`overall_pass`.
 """
 
 from pathlib import Path
 
 from src.asr import transcribe_batch
-from src.metrics import score, bootstrap_ci
+from src.metrics import score, char_counts, bootstrap_ci, bootstrap_delta_ci, verdict
+from src.normalize import Normalizer
 
 
 def _eval_split(model, processor, dataset, normalizer, eval_cfg) -> dict:
@@ -35,12 +59,40 @@ def _eval_split(model, processor, dataset, normalizer, eval_cfg) -> dict:
     return result
 
 
-def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseline: dict) -> dict:
+def _score_by_meeting(predictions: list[dict]) -> dict:
+    """Per-meeting_id CER -- real-bench pools segments from multiple recordings
+    (different rooms/speaker sets); one pooled CER can hide a regression that's
+    actually concentrated in a single recording."""
+    by_meeting: dict[str, list[dict]] = {}
+    for row in predictions:
+        by_meeting.setdefault(row["meeting_id"], []).append(row)
+    result = {}
+    for mid, rows in by_meeting.items():
+        s = score([r["ref"] for r in rows], [r["hyp"] for r in rows])
+        result[mid] = {"cer": s["cer"], "wer": s["wer"], "n_segments": s["n_segments"]}
+    return result
+
+
+def _load_char_counts_from_predictions(csv_path: Path) -> list:
+    """Reconstruct per-segment Counts from a predictions_*.csv (ref/hyp already
+    normalized the same way `score()` would have seen them at write time)."""
+    import csv as csv_module
+
+    with open(csv_path, encoding="utf-8") as f:
+        rows = list(csv_module.DictReader(f))
+    return [char_counts(r["ref"], r["hyp"]) for r in rows]
+
+
+def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseline: dict,
+             baseline_real_csv: str | Path | None = None) -> dict:
     """cfg: src.config.Config. `baseline` is metrics/baseline.json's parsed dict
     (cer_test, cer_ood, cer_real -- all computed once at Stage 1, never
     recomputed here -- PROJECT_CORE.md §2.1 invariant 3). `results["_predictions"]`
     holds per-tier prediction rows for `write_predictions` -- pop it before
-    treating `results` as pure tier/pass data (e.g. `overall_pass`)."""
+    treating `results` as pure tier/pass data (e.g. `overall_pass`).
+    `baseline_real_csv`: path to baseline stage's `audit/predictions_baseline_real.csv`,
+    used for the paired tier-4a comparison (module docstring) -- optional, skipped
+    with a note if not given or the segment count doesn't match."""
     results = {}
     predictions = {}
 
@@ -62,12 +114,42 @@ def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseli
 
     if real_ds is not None:
         real_metrics = _eval_split(model, processor, real_ds, normalizer, cfg.eval)
-        predictions["tier4a_real"] = real_metrics.pop("_predictions")
+        real_predictions = real_metrics.pop("_predictions")
+        predictions["tier4a_real"] = real_predictions
         lo, hi = bootstrap_ci(real_metrics["_char_counts"])
         tier4a_bound = baseline["cer_real"] + cfg.gates.real_cer_regression_pp
         results["tier4a_real"] = {
             "cer": real_metrics["cer"], "ci": [lo, hi], "bound": tier4a_bound,
             "pass": real_metrics["cer"] <= tier4a_bound,
+            "by_meeting": _score_by_meeting(real_predictions),
+        }
+
+        if baseline_real_csv is not None and Path(baseline_real_csv).exists():
+            base_counts = _load_char_counts_from_predictions(Path(baseline_real_csv))
+            cand_counts = real_metrics["_char_counts"]
+            if len(base_counts) == len(cand_counts):
+                d_lo, d_hi = bootstrap_delta_ci(base_counts, cand_counts)
+                results["tier4a_real"]["delta_ci"] = [d_lo, d_hi]
+                results["tier4a_real"]["verdict"] = verdict(d_lo, d_hi)
+            else:
+                results["tier4a_real"]["verdict"] = (
+                    f"SKIPPED (baseline has {len(base_counts)} segments, "
+                    f"candidate has {len(cand_counts)} -- not the same segments)"
+                )
+
+        alt_convention = ("as_written" if cfg.normalization.number_convention == "word_to_digit"
+                           else "word_to_digit")
+        alt_normalizer = Normalizer(
+            strip_punctuation=cfg.normalization.strip_punctuation,
+            lowercase=cfg.normalization.lowercase,
+            number_convention=alt_convention,
+            filler_tokens=cfg.normalization.filler_tokens,
+        )
+        alt_metrics = _eval_split(model, processor, real_ds, alt_normalizer, cfg.eval)
+        results["tier4a_real"]["normalization_check"] = {
+            cfg.normalization.number_convention: real_metrics["cer"],
+            alt_convention: alt_metrics["cer"],
+            "delta_pp": round(abs(real_metrics["cer"] - alt_metrics["cer"]) * 100, 3),
         }
     else:
         results["tier4a_real"] = {"pass": None, "note": "real_bench_path not configured"}

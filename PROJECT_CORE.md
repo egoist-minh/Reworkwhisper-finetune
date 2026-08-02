@@ -192,7 +192,7 @@ seed: 42                              # split sampling + training; §7 requires 
 
 # Data (all fields are user-supplied paths — pipeline is data-agnostic)
 data:
-  dataset_path: dataset/paid-dataset   # training data: paid / unpaid / dataset_by_task — NEVER the bench
+  dataset_path: dataset/paid-dataset-v2  # paid-dataset-v2 (dot2 batch, 2026-08-02) — NEVER the bench
   ood_eval_path: dataset/vivos          # default OOD benchmark, swappable
   real_bench_path: dataset/real-meetings-bench   # Tier-4 real audio + reference transcripts (§4)
   real_clip_path: null                  # optional: extra unlabelled real clips for eyeballing. Tier 4
@@ -267,7 +267,7 @@ hub:
 
 > Pipeline is dataset-agnostic (see §3 `data.dataset_path`). This section documents `paid-dataset` specifically as the best-understood example — its warnings (voice overlap, synthetic bias, digit bias) are properties of *this* dataset, not universal pipeline assumptions. `unpaid-dataset` and `dataset_by_task` still need their own metadata notes here once profiled. `done/` **has** been profiled and is not a training set at all — it is the real-audio benchmark, documented below.
 
-### Dataset: `dataset/paid-dataset/`
+### Dataset: `dataset/paid-dataset/` (superseded — see `paid-dataset-v2` below)
 
 | Property | Value |
 |:---|:---|
@@ -276,6 +276,48 @@ hub:
 | TTS Engine | ElevenLabs `eleven_v3` |
 | Voices | 10 fixed (reused in train/test) |
 | Language | Vietnamese + English code-switch (~48%) |
+
+Kept on disk untouched as historical/checksum reference. No longer read by
+`configs/experiment.yaml` as of 2026-08-02 — superseded by `paid-dataset-v2`.
+
+### Dataset: `dataset/paid-dataset-v2/` (current `data.dataset_path`, since 2026-08-02)
+
+Consolidated by `scripts/ingest_paid_dataset_v2.py` from two sources, per the
+user's 2026-08-02 decision on how to handle the "đợt 2" (batch 2) data drop
+(`dataset/paid-tts-dataset-dot2/`, see its own `docs/bao-cao-dot2.md` for the
+full per-meeting breakdown):
+
+- **dot2's 37 rendered train meetings** (`paid_meeting_0001`–`0037`; 9 more,
+  `0038`–`0046`, are scripted but not yet rendered — ingest again once they land).
+  `0001`–`0015` are byte-identical to the old `paid-dataset` (checksum-verified by
+  hand); `0016`–`0037` is new content, still using the same 10 fixed train voices
+  as batch 1.
+- **dot2's corrected test set**, 3 of 6 planned meetings rendered
+  (`paid_meeting_test_0001`–`0003`), using **10 voices with zero overlap with the
+  10 train voices** — batch 1's test set reused 3/10 train voices, a bug dot2's
+  own report explicitly calls out and fixes.
+- **The old `paid-dataset`'s 6 test meetings, repurposed as train**, renamed
+  `paid_meeting_legacy_0001`–`0006` to avoid colliding with dot2's own
+  `paid_meeting_test_0001`–`0006` id namespace (user decision: since this is a
+  new model generation, the old flawed same-voice test set has no further use as
+  a test set, but the audio/transcript is still valid training data).
+
+| Property | Value |
+|:---|:---|
+| Segments | 4,946 (train: 4,270 / val: 250 / test: 426) |
+| Meetings | 46 (43 train-resolved + 3 test) |
+| Voices | 10 fixed for train (same as batch 1, **not disjoint from train**); test uses 10 **disjoint** voices — first time train/test are voice-disjoint in this project |
+| Language | Vietnamese + English code-switch, plus dot2's civic/legal/retail-domain meetings (broader topic diversity than batch 1's tech/business focus) |
+
+**Critical warning #1 above (voice ID overlap) is now only half true**: train
+voices still overlap across all 46 train meetings (unchanged), but **test no
+longer overlaps train** — tier 1 (in-domain) now measures genuine unseen-voice
+generalization, not "same voices, new content" as before. Warnings 2–4 (synthetic
+data, VIVOS forgetting, digit bias) still apply unchanged.
+
+**Not yet done**: `dataset/CHECKSUMS.txt` has not been regenerated to cover
+`paid-dataset-v2` (only `paid-dataset` + `real-meetings-bench` as of 2026-07-31) —
+do this before trusting a Kaggle-mounted copy of the new dataset.
 
 ### Manifest Schema (JSONL)
 ```json
@@ -480,7 +522,14 @@ The real-audio benchmark is small and non-renewable. It is a **gate, not a tunin
 - **Never used to rank λ.** λ* is selected on synthetic val + OOD only (§6 Stage 3). Sweeping λ against 40 minutes of one or two rooms fits λ to those rooms.
 - **Read once per run, at gate time.** Every extra look burns the set's independence. `provenance.md` records how many times the run touched it.
 - **Not split into dev/test.** Splitting a set this small halves its statistical power for no benefit — tuning happens on synthetic data instead.
-- **4b is nearly free**: long-form decode of a whole meeting needs only the full reference transcript, no segment-level timestamps. Prefer building 4b first.
+- **4b is nearly free**: long-form decode of a whole meeting needs only the full reference transcript, no segment-level timestamps. Prefer building 4b first — still not built as of 2026-08-02.
+
+**Statistical rigor added 2026-08-02** (no new real audio needed — all reuse baseline/gate stage output already on disk): `gate.py:run_gate`'s tier 4a result now carries, alongside the existing point-estimate `cer`/`ci`/`bound`/`pass`:
+- `by_meeting`: CER broken out per real-bench recording (`real_0001` vs `real_0002`) — a pooled CER can hide a regression that's actually concentrated in one room/speaker-set.
+- `delta_ci` / `verdict`: a **paired** bootstrap (`metrics.py:bootstrap_delta_ci`) between the baseline stage's `audit/predictions_baseline_real.csv` and the candidate's predictions on the identical segments — tighter than the existing independent `ci`, classified via `metrics.py:verdict` (previously written, never called) into `IMPROVED`/`REGRESSED`/`INCONCLUSIVE` instead of reading a threshold-only `pass` as if it were noise-free. `INCONCLUSIVE` means the ~264-segment sample genuinely cannot resolve the difference — treat it as "no evidence of a change," not as a pass.
+- `normalization_check`: see the convention-sensitivity check note below.
+
+None of the three affect `pass`/`overall_pass` — they're read-only rigor on top of the existing gate rule, not a new gate.
 
 #### Normalization contract (decided 2026-07-31)
 
@@ -505,7 +554,7 @@ Required safeguards, all cheap:
 - **Symmetric or nothing.** The same function, same config, applied to hypothesis and reference in the same call path. Never normalize one side.
 - **Audit the conversions** (`normalization.audit_conversions`): log per-token conversion counts into `audit/normalization_counts.json`, with `một` and `năm` broken out separately. If those two dominate, the number is being moved by grammar rather than by numerals and the reference should be hand-fixed (A2c).
 - **Baseline reports both.** `metrics/baseline.json` carries `cer_test` (normalized) **and** `cer_test_raw` (as-written), so the "how much of the gain is the normalizer" question from §4 warning 4 stays answerable for every run. This is what keeps the accounting honest under this choice.
-- **Convention-sensitivity check** (A2c): score tier 4 under both conventions once. If the two CERs differ by more than the effect size being gated on, the number is normalization-dominated and must not be reported as a model result.
+- **Convention-sensitivity check** (A2c): score tier 4 under both conventions once. If the two CERs differ by more than the effect size being gated on, the number is normalization-dominated and must not be reported as a model result. **Built 2026-08-02** — `gate.py:run_gate` scores tier 4a a second time under the opposite `number_convention` and writes both numbers + the delta into `gate_results.json:tier4a_real.normalization_check` (diagnostic only, does not affect `pass`). Still open: `cer_test_raw` for tier 1 (baseline.json) as originally spec'd two lines above is not built.
 
 **Fillers — restricted deletion.** Delete only unambiguous hesitation tokens: `ừm`, `ờm`, `ehm`, `uhm`, `hmm`. Explicitly **do not** delete `ạ`, `à`, `ừ`, `ơ`, `dạ`, `vâng` — these are politeness/question particles and real words (`ạ` alone occurs 68× and is almost always the politeness particle). Blanket deletion removes meaning, not noise. The deletion list is a config field, not a constant, and every token in it must be justified in this table.
 
@@ -576,7 +625,8 @@ phowhisper-finetune-exp/
 │   └── run_pipeline.ipynb       # Minimal Kaggle runner (2 cells)
 ├── dataset/                     # NOT tracked in git — supplied per platform; CHECKSUMS.txt IS tracked
 │   ├── CHECKSUMS.txt            # ← committed; only proof two platforms ran on identical bytes
-│   ├── paid-dataset/            # migrated from phowhisper-finetune-exp
+│   ├── paid-dataset/            # migrated from phowhisper-finetune-exp; superseded, kept as reference
+│   ├── paid-dataset-v2/         # current data.dataset_path — consolidated dot2 batch, see §4
 │   ├── unpaid-dataset/
 │   ├── dataset_by_task/
 │   ├── vivos/                   # OOD benchmark (data.ood_eval_path)

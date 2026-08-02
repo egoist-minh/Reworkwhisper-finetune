@@ -133,6 +133,15 @@ def stage_train(cfg) -> Path:
         ood_ds = ManifestDataset(records=ood_records,
                                   audio_root=Path(cfg.data.ood_eval_path) / "audio")
 
+    if cfg.training.limit:
+        # Quick end-to-end dry run: exercise the real Trainer/collator/eval code
+        # paths on a handful of segments instead of the full split, before
+        # spending GPU time on the full run.
+        train_ds = train_ds.limit(cfg.training.limit)
+        val_ds = val_ds.limit(cfg.training.limit)
+        if ood_ds is not None:
+            ood_ds = ood_ds.limit(cfg.training.limit)
+
     # use_safetensors=False skips transformers' auto-conversion probe, which
     # otherwise spawns a background thread that hits HF's discussions API to
     # check for an existing conversion PR -- 403s (PhoWhisper-small has
@@ -205,7 +214,9 @@ def stage_sweep_gate(cfg) -> Path:
         real_ds = ManifestDataset(records=real_records,
                                    audio_root=Path(cfg.data.real_bench_path) / "audio")
 
-    results = run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseline)
+    baseline_real_csv = out / "audit" / "predictions_baseline_real.csv"
+    results = run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseline,
+                        baseline_real_csv=baseline_real_csv)
     gate_path = write_gate_results(results, out)
 
     if results["overall_pass"] and cfg.hub.push:

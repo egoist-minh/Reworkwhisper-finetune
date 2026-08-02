@@ -123,3 +123,11 @@ class ManifestDataset:
             records=[r for r in self.records if r["split"] == split],
             audio_root=self.audio_root,
         )
+
+    def limit(self, n: int | None) -> "ManifestDataset":
+        """First `n` records, or all of them if `n` is falsy -- for a quick
+        end-to-end dry run (cfg.training.limit) that exercises the real
+        train/eval code paths on a handful of segments instead of the full
+        split, before committing GPU time to the full run."""
+        return ManifestDataset(records=self.records[:n] if n else self.records,
+                                audio_root=self.audio_root)

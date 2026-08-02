@@ -6,17 +6,23 @@ base_model: vinai/PhoWhisper-small    # small = runs locally on CPU. Swap to -la
 seed: 42
 
 data:
-  # Migrated into this repo 2026-07-31 (dataset/CHECKSUMS.txt proves identical bytes to
-  # the predecessor repo's copy). No longer depends on D:/phowhisper-finetune-exp.
-  dataset_path: dataset/paid-dataset
+  # dot2 batch ingested 2026-08-02 via scripts/ingest_paid_dataset_v2.py: dot2's 37
+  # rendered train meetings (paid_meeting_0001-0037, 0001-0015 byte-identical to the
+  # old paid-dataset) + the old paid-dataset's 6 test meetings repurposed as train
+  # (renamed paid_meeting_legacy_0001-0006 -- user decision, since the new model
+  # generation uses dot2's corrected test set instead, see below). Old paid-dataset/
+  # kept on disk untouched as historical reference, no longer read by this config.
+  dataset_path: dataset/paid-dataset-v2
   ood_eval_path: null                 # set once scripts/fetch_vivos.py has written it
   # Ingested 2026-07-31 via scripts/ingest_real_bench.py from D:/phowhisper-finetune-exp/
   # dataset/done/ (264 segments after re-segmenting the 20 that exceeded 30s). Tier 4a
   # is in scope for this deadline -- not optional.
   real_bench_path: dataset/real-meetings-bench
   real_clip_path: null                # optional; null = skip
-  # split=demo is 1566 segments; these meetings are carved out of it as val,
-  # leaving 1316 train / 250 val / 236 test. Verified 2026-07-31.
+  # split=demo is 4520 segments (4270 train + 250 val carved out below); test is 426
+  # segments from dot2's paid_meeting_test_0001-0003, using 10 voices with ZERO overlap
+  # with the 10 fixed train voices -- unlike the old test set, this is a genuine
+  # unseen-voice measurement. Verified 2026-08-02 (src/data.py resolve_splits).
   val_meetings: [paid_meeting_0001, paid_meeting_0002, paid_meeting_0011]
 
 # Scoring normalization -- applied identically to hypothesis AND reference.
@@ -30,7 +36,8 @@ normalization:
 
 eval:
   split: test
-  limit: 20                           # null = all segments
+  limit: null                          # was 20 (smoke-test leftover); full split now that
+                                        # test is 426 segments across 3 voice-disjoint meetings
   batch_size: 8                       # weights load fp16 for eval: 3.1 GiB, room to raise
   num_beams: 1
   language: vi
@@ -51,6 +58,8 @@ training:
   warmup_ratio: 0.1
   full_finetune: false
   gradient_checkpointing: true
+  limit: null                         # cap train/val(+ood) segments for a quick dry run of
+                                       # `--stage train` (e.g. 20) before the full run; null = full split
 
 sweep:
   lambdas: [0.0, 0.25, 0.5, 0.75, 1.0]

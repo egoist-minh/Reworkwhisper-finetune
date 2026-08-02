@@ -64,6 +64,9 @@ class Training:
     warmup_ratio: float = 0.1
     full_finetune: bool = False
     gradient_checkpointing: bool = True
+    limit: int | None = None   # cap train/val (+ood, if present) segment count for a
+                                # quick end-to-end dry run; null = full split. Separate
+                                # from eval.limit, which only affects baseline/gate evals.
 
 
 @dataclass
@@ -149,6 +152,8 @@ def validate(cfg: Config) -> None:
         raise ValueError("lora.rank and lora.alpha must be positive")
     if cfg.eval.limit is not None and cfg.eval.limit <= 0:
         raise ValueError("eval.limit must be a positive int or null")
+    if cfg.training.limit is not None and cfg.training.limit <= 0:
+        raise ValueError("training.limit must be a positive int or null")
     if not (0.0 < cfg.lora.min_retained_energy <= 1.0):
         raise ValueError("lora.min_retained_energy must be in (0, 1]")
     if not cfg.sweep.lambdas:

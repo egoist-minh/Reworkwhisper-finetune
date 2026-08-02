@@ -53,6 +53,20 @@ def test_load_audio_16k_resamples_from_24k():
     assert audio.dtype.name == "float32"
 
 
+def test_manifest_dataset_limit_caps_record_count(tmp_path):
+    ds = ManifestDataset(records=[{"audio_filepath": f"{i}.wav", "text": str(i)} for i in range(10)],
+                          audio_root=tmp_path)
+    limited = ds.limit(3)
+    assert len(limited) == 3
+    assert len(ds) == 10  # original untouched
+
+
+def test_manifest_dataset_limit_none_or_zero_is_a_no_op(tmp_path):
+    ds = ManifestDataset(records=[{"audio_filepath": "a.wav", "text": "hi"}], audio_root=tmp_path)
+    assert len(ds.limit(None)) == 1
+    assert len(ds.limit(0)) == 1
+
+
 def test_manifest_dataset_getitem_without_meeting_id(tmp_path):
     """Regression: crashed on VIVOS records (fetch_vivos.py has no meeting_id/
     segment_id fields, unlike paid-dataset) with KeyError: 'meeting_id'."""

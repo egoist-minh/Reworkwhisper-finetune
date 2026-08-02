@@ -9,6 +9,25 @@ Checkpoint strategy: save to `checkpoints/best/` whenever `val_cer` improves.
 Early stopping: 3 eval-round patience. OOD eval runs every eval round (not
 just at the end) so forgetting is visible during training, not only after
 (§0 problem 2).
+
+Early stopping AND best-checkpoint selection both go through one custom
+callback (`_EarlyStoppingState` + `RobustEvalTrackingCallback`, built in
+`train()`), not transformers' built-in `EarlyStoppingCallback` /
+`load_best_model_at_end`+`metric_for_best_model`. Fixed 2026-08-02: with a
+dict-valued `eval_dataset` ({"val": ..., "ood": ...}), the built-in
+`EarlyStoppingCallback` looked up `eval_val_cer` in a `metrics` dict that
+didn't reliably carry it on every `on_evaluate` call, logged "did not find
+eval_val_cer", and permanently disabled itself for the rest of training on
+the first miss -- harmless in the first Kaggle run only because
+`patience == epochs`. `load_best_model_at_end`/`metric_for_best_model` do the
+exact same `f"eval_{metric_for_best_model}"` lookup internally (unverified
+whether they hit the same miss) to decide which checkpoint to restore at the
+end of `.train()` -- silently shipping the last epoch under the name "best"
+if they do. `RobustEvalTrackingCallback` replaces both: it skips any
+`on_evaluate` call whose `metrics` lacks `eval_val_cer` instead of guessing at
+HF's internal key shape, and saves `checkpoints/best/` itself the moment
+`eval_val_cer` improves, so nothing downstream depends on Trainer's own
+best-model bookkeeping.
 """
 
 from dataclasses import dataclass
@@ -39,6 +58,31 @@ class WhisperCollator:
         return {"input_features": feats.input_features, "labels": label_ids}
 
 
+class _EarlyStoppingState:
+    """Pure best-value + patience tracking -- no transformers/torch dependency,
+    testable on its own. Callers only call `.update()` when the metric is
+    actually present in that eval round, so this never has to guess at HF's
+    internal metric-key naming."""
+
+    def __init__(self, patience: int, greater_is_better: bool = False):
+        self.patience = patience
+        self.greater_is_better = greater_is_better
+        self.best: float | None = None
+        self.rounds_without_improvement = 0
+
+    def update(self, value: float) -> bool:
+        """Record one eval round's metric value. Returns True if training should stop."""
+        improved = self.best is None or (
+            value > self.best if self.greater_is_better else value < self.best
+        )
+        if improved:
+            self.best = value
+            self.rounds_without_improvement = 0
+        else:
+            self.rounds_without_improvement += 1
+        return self.rounds_without_improvement >= self.patience
+
+
 def _make_compute_metrics(processor, normalizer: Normalizer):
     def compute_metrics(pred) -> dict:
         pred_ids = pred.predictions
@@ -59,7 +103,7 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
     """cfg: src.config.Config. Returns the path to checkpoints/best/."""
     import torch
     from transformers import (Seq2SeqTrainer, Seq2SeqTrainingArguments,
-                               WhisperProcessor, EarlyStoppingCallback)
+                               WhisperProcessor, TrainerCallback)
     from peft import get_peft_model
 
     from src.lora import build_lora_config
@@ -96,9 +140,6 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
         generation_num_beams=cfg.eval.num_beams,
         eval_strategy="epoch",
         save_strategy="epoch",
-        metric_for_best_model="val_cer",
-        greater_is_better=False,
-        load_best_model_at_end=True,
         report_to=[],
         # Trainer auto-disables tqdm when the transformers logger's effective level is
         # above WARNING (see pipeline.py's _quiet_known_noise, which raises it to ERROR
@@ -113,6 +154,29 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
         remove_unused_columns=False,
     )
 
+    stopping = _EarlyStoppingState(patience=3, greater_is_better=False)
+    best_dir = out / "checkpoints" / "best"
+
+    class RobustEvalTrackingCallback(TrainerCallback):
+        """See the module docstring for why this replaces both the built-in
+        EarlyStoppingCallback and load_best_model_at_end/metric_for_best_model:
+        a `metrics` dict missing `eval_val_cer` on a given `on_evaluate` call is
+        skipped outright, never treated as a reason to disable early stopping
+        or to fall back to "whatever checkpoint is currently loaded" for best-
+        model selection. Saves `checkpoints/best/` itself the instant
+        `eval_val_cer` improves, so this is the sole authority on which
+        checkpoint is "best" -- Trainer's own bookkeeping is not consulted."""
+
+        def on_evaluate(self, args, state, control, metrics=None, model=None, **kwargs):
+            if metrics is None or "eval_val_cer" not in metrics:
+                return control
+            should_stop = stopping.update(metrics["eval_val_cer"])
+            if stopping.rounds_without_improvement == 0:
+                model.save_pretrained(str(best_dir))
+            if should_stop:
+                control.should_training_stop = True
+            return control
+
     trainer = Seq2SeqTrainer(
         model=model,
         args=args,
@@ -120,12 +184,17 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
         eval_dataset={"val": val_ds, "ood": ood_ds},
         data_collator=WhisperCollator(processor),
         compute_metrics=_make_compute_metrics(processor, normalizer),
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
+        callbacks=[RobustEvalTrackingCallback()],
     )
     trainer.train()
 
-    best_dir = out / "checkpoints" / "best"
-    trainer.save_model(str(best_dir))
+    if stopping.best is None:
+        raise RuntimeError(
+            "eval_val_cer was never observed in any on_evaluate call -- "
+            "checkpoints/best/ was never written. compute_metrics or the "
+            "'val' eval_dataset key isn't producing the expected metric; "
+            "fix that before trusting any downstream stage."
+        )
 
     _write_training_csv(trainer.state.log_history, out / "metrics" / "training.csv")
     return best_dir
