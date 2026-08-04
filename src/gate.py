@@ -29,13 +29,31 @@ baseline/gate stages -- no new real audio needed:
     (word-to-digit vs as-written) to surface whether a result is
     normalization-dominated rather than model-dominated (§6 "convention-
     sensitivity check", previously spec'd but not built). Diagnostic only --
-    does not affect `pass`/`overall_pass`.
+    does not affect `pass`/`overall_pass`. Gated on `cfg.normalization.
+    audit_conversions` (was declared in `src/config.py` but never read
+    anywhere until 2026-08-04 -- also added the same check to tier1_in_domain,
+    since without it a tier1 CER gain can't be attributed between digit-
+    normalization and actual acoustic learning).
+
+Rejoin-before-scoring (found 2026-08-04 reading v3-r16's tier4a audit):
+`scripts/ingest_real_bench.py` splits any real-bench segment over 30s into
+sub-chunks, cutting audio at real silence but dividing the *text* only
+proportionally by each chunk's share of duration -- not real alignment, per
+that script's own docstring. When speech rate is uneven this mis-attributes
+words across chunk boundaries, so scoring a sub-chunk's hyp against its own
+ref inflates CER for both baseline and candidate alike (confirmed on v3-r16:
+pooled CER dropped from 45.8%/48.0% to 31.6%/35.1% baseline/candidate once
+rejoined). `rejoin_real_chunks`/`score_real` below concatenate sub-chunks
+back to their parent segment (exact, by the ingest script's own invariant)
+before computing CER/CI/by_meeting/delta_ci -- changes the absolute CER
+number but not the tier's pass/fail semantics.
 """
 
+import re
 from pathlib import Path
 
 from src.asr import transcribe_batch
-from src.metrics import score, char_counts, bootstrap_ci, bootstrap_delta_ci, verdict
+from src.metrics import score, char_counts, rate, bootstrap_ci, bootstrap_delta_ci, verdict
 from src.normalize import Normalizer
 
 
@@ -75,6 +93,48 @@ def _score_by_meeting(predictions: list[dict]) -> dict:
     return result
 
 
+def _parent_segment_id(segment_id: str) -> str:
+    """`seg_0000` or `seg_0000_3` (scripts/ingest_real_bench.py naming) -> `seg_0000`."""
+    m = re.match(r"(seg_\d{4})(?:_\d+)?$", segment_id)
+    return m.group(1) if m else segment_id
+
+
+def _chunk_suffix(segment_id: str) -> int:
+    m = re.match(r"seg_\d{4}(?:_(\d+))?$", segment_id)
+    return int(m.group(1)) if m and m.group(1) else 0
+
+
+def rejoin_real_chunks(predictions: list[dict]) -> list[dict]:
+    """Concatenate ingest sub-chunks (module docstring, "Rejoin-before-scoring")
+    back to their parent segment, in chunk order, per meeting_id. Concatenation
+    reproduces the original pre-split ref exactly -- ingest script's own
+    invariant -- so this only undoes the sub-chunk text/audio mis-attribution,
+    it does not lose or alter any text."""
+    groups: dict[tuple, list[dict]] = {}
+    for row in predictions:
+        key = (row["meeting_id"], _parent_segment_id(row["segment_id"]))
+        groups.setdefault(key, []).append(row)
+    out = []
+    for (meeting_id, parent), rows in groups.items():
+        rows = sorted(rows, key=lambda r: _chunk_suffix(r["segment_id"]))
+        out.append({
+            "segment_id": parent, "meeting_id": meeting_id,
+            "ref": " ".join(r["ref"] for r in rows),
+            "hyp": " ".join(r["hyp"] for r in rows),
+        })
+    return out
+
+
+def score_real(predictions: list[dict]) -> dict:
+    """CER for a real-bench split at the parent-segment level (see
+    `rejoin_real_chunks`) instead of raw ingest sub-chunks. `_char_counts` is
+    per-parent-segment, for `bootstrap_ci`/`bootstrap_delta_ci`; `_rejoined`
+    is the rejoined rows, for `_score_by_meeting`."""
+    rejoined = rejoin_real_chunks(predictions)
+    counts = [char_counts(r["ref"], r["hyp"]) for r in rejoined]
+    return {"cer": rate(counts), "_char_counts": counts, "_rejoined": rejoined}
+
+
 def _load_char_counts_from_predictions(csv_path: Path) -> list:
     """Reconstruct per-segment Counts from a predictions_*.csv (ref/hyp already
     normalized the same way `score()` would have seen them at write time)."""
@@ -106,6 +166,24 @@ def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseli
         "pass": test_metrics["cer"] <= tier1_bound,
     }
 
+    if cfg.normalization.audit_conversions:
+        tier1_alt_convention = ("as_written" if cfg.normalization.number_convention == "word_to_digit"
+                                 else "word_to_digit")
+        tier1_alt_normalizer = Normalizer(
+            strip_punctuation=cfg.normalization.strip_punctuation,
+            lowercase=cfg.normalization.lowercase,
+            number_convention=tier1_alt_convention,
+            filler_tokens=cfg.normalization.filler_tokens,
+        )
+        tier1_alt_metrics = _eval_split(model, processor, test_ds, tier1_alt_normalizer, cfg.eval,
+                                         desc="gate:tier1_in_domain_normcheck")
+        tier1_alt_metrics.pop("_predictions")
+        results["tier1_in_domain"]["normalization_check"] = {
+            cfg.normalization.number_convention: test_metrics["cer"],
+            tier1_alt_convention: tier1_alt_metrics["cer"],
+            "delta_pp": round(abs(test_metrics["cer"] - tier1_alt_metrics["cer"]) * 100, 3),
+        }
+
     ood_metrics = _eval_split(model, processor, ood_ds, normalizer, cfg.eval, desc="gate:tier2_ood")
     predictions["tier2_ood"] = ood_metrics.pop("_predictions")
     tier2_bound = baseline["cer_ood"] + cfg.sweep.ood_cer_budget
@@ -118,17 +196,21 @@ def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseli
         real_metrics = _eval_split(model, processor, real_ds, normalizer, cfg.eval, desc="gate:tier4a_real")
         real_predictions = real_metrics.pop("_predictions")
         predictions["tier4a_real"] = real_predictions
-        lo, hi = bootstrap_ci(real_metrics["_char_counts"])
+        real_scored = score_real(real_predictions)
+        lo, hi = bootstrap_ci(real_scored["_char_counts"])
         tier4a_bound = baseline["cer_real"] + cfg.gates.real_cer_regression_pp
         results["tier4a_real"] = {
-            "cer": real_metrics["cer"], "ci": [lo, hi], "bound": tier4a_bound,
-            "pass": real_metrics["cer"] <= tier4a_bound,
-            "by_meeting": _score_by_meeting(real_predictions),
+            "cer": real_scored["cer"], "ci": [lo, hi], "bound": tier4a_bound,
+            "pass": real_scored["cer"] <= tier4a_bound,
+            "by_meeting": _score_by_meeting(real_scored["_rejoined"]),
         }
 
         if baseline_real_csv is not None and Path(baseline_real_csv).exists():
-            base_counts = _load_char_counts_from_predictions(Path(baseline_real_csv))
-            cand_counts = real_metrics["_char_counts"]
+            import csv as _csv_module
+            with open(baseline_real_csv, encoding="utf-8") as f:
+                base_rows = list(_csv_module.DictReader(f))
+            base_counts = score_real(base_rows)["_char_counts"]
+            cand_counts = real_scored["_char_counts"]
             if len(base_counts) == len(cand_counts):
                 d_lo, d_hi = bootstrap_delta_ci(base_counts, cand_counts)
                 results["tier4a_real"]["delta_ci"] = [d_lo, d_hi]
@@ -139,21 +221,23 @@ def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseli
                     f"candidate has {len(cand_counts)} -- not the same segments)"
                 )
 
-        alt_convention = ("as_written" if cfg.normalization.number_convention == "word_to_digit"
-                           else "word_to_digit")
-        alt_normalizer = Normalizer(
-            strip_punctuation=cfg.normalization.strip_punctuation,
-            lowercase=cfg.normalization.lowercase,
-            number_convention=alt_convention,
-            filler_tokens=cfg.normalization.filler_tokens,
-        )
-        alt_metrics = _eval_split(model, processor, real_ds, alt_normalizer, cfg.eval,
-                                   desc="gate:tier4a_real_normcheck")
-        results["tier4a_real"]["normalization_check"] = {
-            cfg.normalization.number_convention: real_metrics["cer"],
-            alt_convention: alt_metrics["cer"],
-            "delta_pp": round(abs(real_metrics["cer"] - alt_metrics["cer"]) * 100, 3),
-        }
+        if cfg.normalization.audit_conversions:
+            alt_convention = ("as_written" if cfg.normalization.number_convention == "word_to_digit"
+                               else "word_to_digit")
+            alt_normalizer = Normalizer(
+                strip_punctuation=cfg.normalization.strip_punctuation,
+                lowercase=cfg.normalization.lowercase,
+                number_convention=alt_convention,
+                filler_tokens=cfg.normalization.filler_tokens,
+            )
+            alt_metrics = _eval_split(model, processor, real_ds, alt_normalizer, cfg.eval,
+                                       desc="gate:tier4a_real_normcheck")
+            alt_scored = score_real(alt_metrics.pop("_predictions"))
+            results["tier4a_real"]["normalization_check"] = {
+                cfg.normalization.number_convention: real_scored["cer"],
+                alt_convention: alt_scored["cer"],
+                "delta_pp": round(abs(real_scored["cer"] - alt_scored["cer"]) * 100, 3),
+            }
     else:
         results["tier4a_real"] = {"pass": None, "note": "real_bench_path not configured"}
 

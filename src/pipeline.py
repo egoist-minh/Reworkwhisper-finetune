@@ -88,7 +88,11 @@ def stage_baseline(cfg) -> Path:
 
     def _eval_and_record(name: str, dataset) -> float:
         result = _eval_split(model, processor, dataset, normalizer, cfg.eval, desc=f"baseline:{name}")
-        write_predictions(result.pop("_predictions"), out / "audit" / f"predictions_baseline_{name}.csv")
+        predictions = result.pop("_predictions")
+        write_predictions(predictions, out / "audit" / f"predictions_baseline_{name}.csv")
+        if name == "real":
+            from src.gate import score_real
+            return score_real(predictions)["cer"]
         return result["cer"]
 
     baseline = {"cer_test": _eval_and_record("test", ds.filter_split("test"))}
