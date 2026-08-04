@@ -1,0 +1,1219 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>viet-speech · Báo cáo quá trình fine-tune PhoWhisper</title>
+<style>
+:root{
+  --bg:#ffffff;
+  --fg:#1f2328;
+  --muted:#59636e;
+  --border:#d1d9e0;
+  --border-strong:#afb8c1;
+  --subtle-bg:#f6f8fa;
+  --code-bg:rgba(129,139,152,0.12);
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0d1117; --fg:#e6edf3; --muted:#9198a1;
+    --border:#3d444d; --border-strong:#656c76;
+    --subtle-bg:#151b23; --code-bg:rgba(101,108,118,0.2);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0d1117; --fg:#e6edf3; --muted:#9198a1;
+  --border:#3d444d; --border-strong:#656c76;
+  --subtle-bg:#151b23; --code-bg:rgba(101,108,118,0.2);
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --fg:#1f2328; --muted:#59636e;
+  --border:#d1d9e0; --border-strong:#afb8c1;
+  --subtle-bg:#f6f8fa; --code-bg:rgba(129,139,152,0.12);
+}
+
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--fg);
+  font-family:var(--sans);
+  line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+}
+
+/* ============ deck shell ============ */
+.deck{position:relative; height:100vh; width:100vw;}
+
+.slide{
+  position:absolute; inset:0;
+  display:none;
+  flex-direction:column;
+  /* flex-start + margin:auto on .slide-inner, NOT justify-content:center -- a centered
+     flex item taller than the box overflows past the top edge and is unreachable;
+     auto margins collapse to 0 instead, so an over-tall slide scrolls from the top */
+  justify-content:flex-start;
+  overflow-y:auto;
+  padding:clamp(28px,4.5vh,64px) clamp(28px,6vw,96px) clamp(60px,8.5vh,96px);
+}
+.slide.active{display:flex;}
+@media (prefers-reduced-motion: no-preference){
+  .slide.active{animation:fade .18s ease-out;}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+}
+
+.slide-inner{width:100%; max-width:1060px; margin:auto;}
+
+/* two-column text block -- halves the height of a stack of short paragraphs */
+.cols2{columns:2; column-gap:clamp(18px,2.4vw,40px);}
+.cols2 > *{break-inside:avoid;}
+.cols2 > p:last-child{margin-bottom:0;}
+.note.cols2{max-width:none;}
+.note.cols2 .note-title{column-span:all;}
+@media (max-width:820px){ .cols2{columns:1;} }
+
+/* figure beside its supporting table/note -- for slides where stacking overflows */
+.split{
+  display:grid;
+  grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);
+  gap:clamp(14px,1.8vw,30px);
+  align-items:start;
+}
+.split .fig{margin-bottom:0;}
+.split .fig img{max-width:none; max-height:42vh;}
+.split .fig-cap{max-width:none;}
+/* table-dominant variant: wide table left, note right */
+.split.wide{grid-template-columns:minmax(0,1.75fr) minmax(0,1fr);}
+.split .table-wrap:last-child,.split .note:last-child{margin-bottom:0;}
+@media (max-width:900px){ .split,.split.wide{grid-template-columns:1fr;} }
+
+/* ============ typography ============ */
+.eyebrow{
+  font-family:var(--mono);
+  font-size:clamp(.68rem,1vw,.82rem);
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  color:var(--muted);
+  margin-bottom:clamp(10px,1.6vh,18px);
+}
+
+h1{
+  margin:0;
+  font-size:clamp(2rem,4.6vw,3.6rem);
+  font-weight:600;
+  letter-spacing:-.02em;
+  line-height:1.1;
+  text-wrap:balance;
+}
+h2{
+  margin:0 0 clamp(6px,1.2vh,12px);
+  font-size:clamp(1.35rem,2.85vw,2.2rem);
+  font-weight:600;
+  letter-spacing:-.015em;
+  line-height:1.15;
+  padding-bottom:clamp(9px,1.3vh,15px);
+  border-bottom:1px solid var(--border);
+  text-wrap:balance;
+}
+.lede{
+  font-size:clamp(1rem,1.55vw,1.3rem);
+  color:var(--muted);
+  max-width:62ch;
+  margin:clamp(16px,2.4vh,28px) 0 0;
+}
+p{margin:0 0 clamp(9px,1.4vh,15px);}
+p:last-child{margin-bottom:0;}
+strong{font-weight:600;}
+em{font-style:normal; color:var(--muted); font-size:.86em;}
+
+code{
+  font-family:var(--mono);
+  font-size:.86em;
+  background:var(--code-bg);
+  padding:.16em .38em;
+  border-radius:6px;
+  white-space:nowrap;
+}
+
+.body-text{font-size:clamp(.92rem,1.3vw,1.12rem); max-width:72ch;}
+.small{font-size:clamp(.78rem,1.05vw,.92rem); color:var(--muted); max-width:76ch;}
+
+/* ============ badges ============ */
+.meta{display:flex; flex-wrap:wrap; gap:7px; align-items:center; margin:0 0 clamp(14px,2.2vh,24px);}
+.badge{
+  display:inline-block;
+  font-family:var(--mono);
+  font-size:clamp(.66rem,.92vw,.78rem);
+  line-height:1.7;
+  padding:0 9px;
+  border:1px solid var(--border-strong);
+  border-radius:2em;
+  color:var(--muted);
+  white-space:nowrap;
+}
+.badge.solid{background:var(--fg); color:var(--bg); border-color:var(--fg); font-weight:600;}
+
+/* ============ model identity strip ============ */
+.models{
+  border:1px solid var(--border);
+  border-radius:6px;
+  overflow:hidden;
+  margin:0 0 clamp(14px,2.2vh,24px);
+  font-size:clamp(.74rem,1.02vw,.9rem);
+}
+.models .mrow{
+  display:grid;
+  grid-template-columns:clamp(96px,11vw,150px) 1fr;
+  gap:clamp(8px,1.2vw,16px);
+  padding:clamp(5px,.9vh,9px) clamp(13px,1.5vw,19px);
+  border-bottom:1px solid var(--border);
+}
+.models .mrow:last-child{border-bottom:none;}
+.models .mrow:nth-child(2n){background:var(--subtle-bg);}
+.models .mk{color:var(--muted);}
+.models .mv{font-family:var(--mono); word-break:break-all;}
+.models .mv .dim{color:var(--muted);}
+@media (max-width:700px){
+  .models .mrow{grid-template-columns:1fr; gap:0;}
+}
+
+/* ============ stat strip ============ */
+.stats{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));
+  border:1px solid var(--border);
+  border-radius:6px;
+  overflow:hidden;
+  margin:0 0 clamp(16px,2.4vh,26px);
+}
+.stat{padding:clamp(12px,1.9vh,20px) clamp(15px,1.9vw,22px); border-right:1px solid var(--border);}
+.stat:last-child{border-right:none;}
+.stat-val{
+  font-family:var(--mono);
+  font-size:clamp(1.4rem,2.9vw,2.2rem);
+  font-weight:600;
+  font-variant-numeric:tabular-nums;
+  letter-spacing:-.03em;
+  line-height:1.1;
+}
+.stat-val .from{color:var(--muted); font-weight:400;}
+.stat-val .arr{color:var(--muted); font-weight:400; padding:0 .12em;}
+.stat-key{font-size:clamp(.73rem,1.02vw,.88rem); color:var(--muted); margin-top:6px; line-height:1.4;}
+
+/* ============ tables ============ */
+.table-wrap{overflow-x:auto; margin:0 0 clamp(12px,1.8vh,18px);}
+table{border-collapse:collapse; width:100%; font-size:clamp(.8rem,1.15vw,.98rem);}
+th,td{padding:clamp(5px,1vh,10px) clamp(9px,1.15vw,15px); border:1px solid var(--border); text-align:left;}
+thead th{background:var(--subtle-bg); font-weight:600;}
+tbody tr:nth-child(2n){background:var(--subtle-bg);}
+td.num,th.num{font-family:var(--mono); font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap;}
+td.res{font-family:var(--mono); white-space:nowrap; font-size:.92em;}
+tfoot td{background:var(--subtle-bg); font-weight:600;}
+
+/* long HF model names must wrap instead of forcing the table wide */
+table.dense th,table.dense td{padding:clamp(2px,.45vh,6px) clamp(7px,.95vw,12px);}
+table.dense{font-size:clamp(.72rem,1.02vw,.88rem);}
+td.model code,th code{white-space:normal; word-break:break-word;}
+
+/* model-per-column score grid: one column group per fine-tune run.
+   table-layout:fixed + colgroup, else the longest HF name steals all the width */
+table.grid{table-layout:fixed;}
+table.grid .gsep{border-left:2px solid var(--border-strong);}
+table.grid tbody td.num{text-align:center;}
+table.grid th code{word-break:normal; overflow-wrap:break-word;}
+table.grid thead th{text-align:center; vertical-align:bottom; font-weight:600;}
+table.grid thead tr.mh th{font-weight:400; font-size:.94em; line-height:1.35;}
+table.grid thead tr.mh code{font-size:.8em;}   /* keep HF names breaking at hyphens */
+table.grid thead tr.mh em{display:block; font-size:.9em;}
+table.grid tbody th{text-align:left; font-weight:600; background:var(--subtle-bg);}
+table.grid tbody th em{display:block; font-weight:400;}
+table.grid tbody tr.lam td,table.grid tbody tr.lam th{color:var(--muted); font-size:.92em;}
+table.grid tbody tr:nth-child(2n){background:none;}
+table.grid tbody tr:nth-child(2n) td{background:var(--subtle-bg);}
+
+/* ============ diff blocks ============ */
+.diff{
+  border:1px solid var(--border);
+  border-radius:6px;
+  overflow:hidden;
+  margin:0 0 clamp(10px,1.6vh,16px);
+  font-family:var(--mono);
+  font-size:clamp(.73rem,1.02vw,.9rem);
+  line-height:1.7;
+}
+.diff-head{
+  background:var(--subtle-bg);
+  border-bottom:1px solid var(--border);
+  padding:4px clamp(9px,1.15vw,13px);
+  color:var(--muted);
+  font-size:.88em;
+}
+.diff .line{display:grid; grid-template-columns:clamp(60px,6.5vw,86px) 1fr; gap:10px; padding:2px clamp(9px,1.15vw,13px);}
+.diff .line .who{color:var(--muted); user-select:none;}
+.diff .line.bad{background:var(--subtle-bg);}
+.diff .line.bad .txt{text-decoration:line-through; text-decoration-thickness:1px; color:var(--muted);}
+.diff .line.good .txt{font-weight:600;}
+.diff-foot{
+  border-top:1px solid var(--border);
+  padding:4px clamp(9px,1.15vw,13px);
+  color:var(--muted);
+  font-size:.82em;
+}
+
+/* ============ figures ============ */
+.fig{margin:0 0 clamp(10px,1.6vh,16px);}
+.fig img{
+  display:block;
+  width:100%; max-width:880px; margin:0 auto;
+  max-height:46vh; object-fit:contain;
+  /* the PNGs are matplotlib output on white -- keep the white plate in dark mode
+     too, inverting them would recolor the data series */
+  background:#fff;
+  border:1px solid var(--border);
+  border-radius:6px;
+}
+.fig-cap{
+  display:block;
+  margin:clamp(7px,1.1vh,11px) auto 0;
+  max-width:880px;
+  font-size:clamp(.72rem,1vw,.86rem);
+  color:var(--muted);
+  line-height:1.5;
+}
+.fig-cap strong{color:var(--fg);}
+.fig-cap .warn{color:var(--fg); font-weight:600;}
+.fig-cap ul{margin:0; padding-left:1.15em;}
+.fig-cap li{margin-bottom:2px;}
+
+/* ============ note + verdict ============ */
+.note{
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:clamp(10px,1.5vh,15px) clamp(13px,1.5vw,19px);
+  margin:0 0 clamp(10px,1.6vh,16px);
+  font-size:clamp(.79rem,1.1vw,.96rem);
+  color:var(--muted);
+  max-width:82ch;
+}
+.note:last-child{margin-bottom:0;}
+.note-title{display:block; font-weight:600; color:var(--fg); margin-bottom:3px;}
+
+.verdict{
+  border-left:.22em solid var(--fg);
+  padding:2px 0 2px clamp(12px,1.4vw,18px);
+  margin:clamp(14px,2.2vh,24px) 0 0;
+  max-width:76ch;
+}
+.v-label{
+  display:block;
+  font-family:var(--mono);
+  font-size:clamp(.66rem,.92vw,.76rem);
+  text-transform:uppercase;
+  letter-spacing:.05em;
+  color:var(--muted);
+  margin-bottom:4px;
+}
+.verdict p{font-size:clamp(.92rem,1.3vw,1.12rem);}
+
+blockquote{
+  margin:clamp(16px,2.4vh,28px) 0 0;
+  padding:0 0 0 1em;
+  border-left:.22em solid var(--border-strong);
+  color:var(--muted);
+  font-size:clamp(.85rem,1.15vw,1.02rem);
+  max-width:72ch;
+}
+blockquote strong{color:var(--fg);}
+
+/* ============ summary rows ============ */
+.sumrows{border-top:1px solid var(--border); margin-top:clamp(16px,2.4vh,28px);}
+.sumrow{
+  display:grid;
+  grid-template-columns:clamp(56px,7vw,88px) 1fr;
+  gap:clamp(12px,2vw,28px);
+  align-items:baseline;
+  padding:clamp(12px,2vh,20px) 0;
+  border-bottom:1px solid var(--border);
+}
+.sumrow .k{font-family:var(--mono); font-weight:600; font-size:clamp(1rem,1.7vw,1.4rem);}
+.sumrow .v{font-size:clamp(.9rem,1.3vw,1.12rem); color:var(--muted);}
+.sumrow .v strong{color:var(--fg);}
+
+/* ============ chrome ============ */
+.progress{position:fixed; top:0; left:0; height:2px; background:var(--fg); transition:width .18s ease-out; z-index:10;}
+.chrome{
+  position:fixed; bottom:0; left:0; right:0;
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+  padding:clamp(11px,1.6vh,18px) clamp(28px,6vw,96px);
+  font-family:var(--mono);
+  font-size:clamp(.66rem,.92vw,.76rem);
+  color:var(--muted);
+  pointer-events:none;
+}
+.chrome .nav{display:flex; gap:6px; pointer-events:auto;}
+.chrome button{
+  font:inherit; color:var(--muted); background:transparent;
+  border:1px solid var(--border); border-radius:6px;
+  padding:3px 10px; cursor:pointer; line-height:1.6;
+}
+.chrome button:hover{border-color:var(--border-strong); color:var(--fg);}
+.chrome button:focus-visible{outline:2px solid var(--fg); outline-offset:2px;}
+.counter{font-variant-numeric:tabular-nums;}
+.hint{opacity:.75;}
+@media (max-width:700px){
+  .hint{display:none;}
+  .stat{border-right:none; border-bottom:1px solid var(--border);}
+  .stat:last-child{border-bottom:none;}
+  .diff .line{grid-template-columns:1fr; gap:0;}
+}
+
+@media print{
+  /* force light tokens — otherwise a dark-mode OS prints black pages */
+  :root, :root[data-theme="dark"], :root[data-theme="light"]{
+    --bg:#ffffff; --fg:#1f2328; --muted:#59636e;
+    --border:#d1d9e0; --border-strong:#afb8c1;
+    --subtle-bg:#f6f8fa; --code-bg:rgba(129,139,152,0.12);
+  }
+  @page{ size:A4 landscape; margin:11mm; }
+
+  html,body{height:auto; overflow:visible;}
+  body{
+    background:#fff; color:var(--fg);
+    -webkit-print-color-adjust:exact; print-color-adjust:exact;
+  }
+  .deck{height:auto; width:auto;}
+
+  .slide{
+    position:static;
+    display:flex !important;
+    overflow:visible;
+    min-height:88vh;
+    padding:0 0 10mm;
+    page-break-after:always; break-after:page;
+    page-break-inside:avoid; break-inside:avoid;
+  }
+  .slide:last-child{page-break-after:auto; break-after:auto;}
+  .slide-inner{max-width:none;}
+
+  /* keep data blocks intact across page boundaries */
+  .models,.stats,.diff,.note,.table-wrap,table,.verdict,.sumrow,.fig{
+    page-break-inside:avoid; break-inside:avoid;
+  }
+  /* vh is the page box when printing, so the screen cap is wrong here -- use mm so a
+     figure slide plus its caption still fits one A4 landscape page */
+  .fig img{max-height:88mm;}
+  .split .fig img{max-height:70mm;}   /* shares the page with a table below it */
+
+  .progress,.chrome{display:none !important;}
+}
+</style>
+</head>
+<body>
+
+<div class="progress" id="progress"></div>
+
+<div class="deck" id="deck">
+
+  <!-- 1 · title ........................................ -->
+  <section class="slide active">
+    <div class="slide-inner">
+      <div class="eyebrow">Dự án viet-speech · 2026-08 · ba lần fine-tune, ba dataset</div>
+      <h1>Báo cáo quá trình<br>fine-tune PhoWhisper</h1>
+      <p class="lede">Lần đầu chứng minh fine-tune có hiệu quả — và làm lộ một rủi ro.
+      Lần hai sửa rủi ro đó. Lần ba lặp lại kết quả tốt trên dataset lớn hơn và đo chặt hơn.</p>
+      <blockquote>
+        <strong>CER</strong> = % ký tự sai so với transcript đúng — <strong>thấp hơn là tốt hơn</strong>.
+        Ba lần dùng ba dataset khác nhau, nên không so CER trực tiếp giữa các lần;
+        chỉ so mức cải thiện trong từng lần.
+      </blockquote>
+
+      <div class="models" style="margin-top:clamp(16px,2.4vh,26px); margin-bottom:0;">
+        <div class="mrow"><span class="mk">23/07</span><span class="mv">winhsss/reworkwhisper-large-v1 <span class="dim">· dataset-dot1</span></span></div>
+        <div class="mrow"><span class="mk">30/07</span><span class="mv">winhsss/reworkwhisper-large-v3-0.5lamda <span class="dim">· paid-dataset</span></span></div>
+        <div class="mrow"><span class="mk">04/08</span><span class="mv">winhsss/Reworkwhisper-large-v4 <span class="dim">· paid-dataset-v2 · mới nhất</span></span></div>
+      </div>
+
+      <div class="note" style="margin-top:clamp(12px,1.8vh,20px); margin-bottom:0;">
+        <span class="note-title">Về tên gọi</span>
+        Slide này gọi model bằng <strong>đúng tên trên HuggingFace</strong>, không dùng nhãn
+        "v1/v2/v3". Lý do: nhãn đó đá nhau với ba hệ số đếm khác — số của HF nhảy
+        <code>v1 → v3 → v4</code>, run ID là <code>dot1-v1-lora</code> / <code>v1c-r16-valfix</code> /
+        <code>v3-r16</code>, và dataset mới nhất lại tên <code>paid-dataset-v2</code>.
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 · dataset dot1 ................................. -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Lần 1 · Dataset <code>dataset-dot1</code></h2>
+      <div class="meta">
+        <span class="badge">100% synthetic</span>
+        <span class="badge">kịch bản LLM + viXTTS voice-clone</span>
+        <span class="badge">16 kHz mono</span>
+      </div>
+
+      <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Split</th><th class="num">Segment</th><th class="num">Giờ</th>
+            <th class="num">Meeting</th><th class="num">Giọng</th><th class="num">Code-switch</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Train</td><td class="num">1,347</td><td class="num">2.26</td><td class="num">12</td><td class="num">14</td><td class="num">64%</td></tr>
+          <tr><td>Test / val</td><td class="num">500</td><td class="num">0.65</td><td class="num">5</td><td class="num">14</td><td class="num">69%</td></tr>
+        </tbody>
+        <tfoot>
+          <tr><td>Tổng</td><td class="num">1,847</td><td class="num">2.91</td><td class="num">17</td><td class="num">14</td><td class="num">—</td></tr>
+        </tfoot>
+      </table>
+      </div>
+
+      <div class="note">
+        <span class="note-title">Meeting rời nhau, nhưng 14 giọng dùng chung cả hai split</span>
+        Test đo được "nội dung họp mới", <strong>không</strong> đo được "giọng chưa từng nghe".
+      </div>
+
+      <div class="note">
+        <span class="note-title">Lỗi hệ thống của bộ này</span>
+        Audio tổng hợp từ <code>tts_input</code> đã Việt hoá sẵn ("server" → "sơ-vơ"),
+        còn nhãn giữ chính tả tiếng Anh — tức bộ dữ liệu <strong>dạy model nghe "sơ-vơ" viết "server"</strong>.
+        Đây là lý do CER của model gốc trên bộ này cao bất thường (29.65%).
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 · reworkwhisper-large-v1 results ............... -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2><code>reworkwhisper-large-v1</code> — học được, nhưng quên tiếng Việt</h2>
+      <div class="meta">
+        <span class="badge">2026-07-23</span>
+        <span class="badge">LoRA r16 · q,k,v,out_proj</span>
+        <span class="badge solid">λ = 1.0 · áp dụng toàn bộ</span>
+      </div>
+
+      <div class="models">
+        <div class="mrow"><span class="mk">Model nền</span><span class="mv">vinai/PhoWhisper-large</span></div>
+        <div class="mrow"><span class="mk">Model sản phẩm</span><span class="mv">winhsss/reworkwhisper-large-v1</span></div>
+        <div class="mrow"><span class="mk">Run</span><span class="mv">dot1-v1-lora <span class="dim">· dataset-dot1</span></span></div>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-val"><span class="from">29.65</span><span class="arr">→</span>18.53</div>
+          <div class="stat-key">CER% trong miền · test 500 câu, họp mới</div>
+        </div>
+        <div class="stat">
+          <div class="stat-val"><span class="from">1.78</span><span class="arr">→</span>4.42</div>
+          <div class="stat-key">CER% VIVOS, giọng thật ngoài miền · ×2.48 tệ hơn</div>
+        </div>
+      </div>
+
+      <p class="body-text">Model học rất tốt nội dung họp: giữ đúng chính tả từ tiếng Anh mà bản gốc
+      hay phiên âm bậy. Nhưng vì <strong>áp dụng toàn bộ phần trọng số đã học, không giảm biên độ</strong>,
+      model <strong>quên khả năng nghe tiếng Việt tổng quát</strong>. Trên VIVOS (giọng đọc sách,
+      không liên quan gì tới dữ liệu train), số câu lỗi nặng tăng từ <strong>9 lên 18 câu</strong>.</p>
+
+      <div class="verdict">
+        <span class="v-label">Kết luận lần 1</span>
+        <p>Bằng chứng thứ nhất: fine-tune <strong>có hiệu quả thật</strong> trên nội dung mục tiêu.
+        Đồng thời là nơi tìm ra bug cần sửa.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 · reworkwhisper-large-v1 training curve ........ -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2><code>reworkwhisper-large-v1</code> — quá trình học</h2>
+      <div class="meta">
+        <span class="badge">run <code>dot1-v1-lora</code></span>
+        <span class="badge">129 step · 3 epoch</span>
+        <span class="badge solid">λ = 1.0</span>
+      </div>
+
+      <figure class="fig">
+        <img src="training-curves/reworkwhisper-large-v1_training-curve.png"
+             alt="Training curve của reworkwhisper-large-v1: train loss và eval CER/WER theo epoch">
+        <figcaption class="fig-cap"><ul>
+          <li>Đường đỏ/cam: CER và WER trên tập 500 câu. <span class="warn">Tập này vừa là val
+          vừa là test</span> — <code>dataset-dot1</code> chỉ có một file
+          <code>manifest.val.jsonl</code> dùng cho cả hai. Nên <strong>18.53% ở cuối đồ thị chính
+          là con số test ở slide trước</strong>, và cũng chính là chỗ hở mà lần 2 phải sửa.</li>
+          <li>Trục phải: train loss, log mỗi 25 step → chỉ 5 điểm.</li>
+          <li><strong>Base 29.65% không nằm trên đồ thị.</strong> Đường bắt đầu ở epoch 1 = 23.93%,
+          đã là sau khi train.</li>
+          <li>VIVOS 1.78% → 4.42% ở slide trước không có trên đồ thị — lần này không đo VIVOS trong
+          lúc train. Hai số đó từ kernel Kaggle <code>winhkento/benchmark-asr</code>.</li>
+        </ul></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- 5 · reworkwhisper-large-v1 win/loss .............. -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2><code>reworkwhisper-large-v1</code> — được gì, mất gì</h2>
+      <div class="meta"><span class="badge">ví dụ thật, trích từ predictions</span></div>
+
+      <div class="diff">
+        <div class="diff-head">được — giữ đúng thuật ngữ tiếng Anh (test in-domain)</div>
+        <div class="line"><span class="who">ref</span><span class="txt">một issue … upload file … thì fail</span></div>
+        <div class="line bad"><span class="who">− base</span><span class="txt">áp lốt phai phai … thị phèo</span></div>
+        <div class="line good"><span class="who">+ FT</span><span class="txt">đúng nguyên văn — CER 0%</span></div>
+      </div>
+
+      <div class="diff">
+        <div class="diff-head">mất — quên tiếng Việt nền (VIVOS, giọng thật đọc chuẩn)</div>
+        <div class="line"><span class="who">ref</span><span class="txt">tiếng cọc cạch khựng lại của những khớp sắt</span></div>
+        <div class="line good"><span class="who">base</span><span class="txt">tiếng cọc cạch khựng lại của những khớp sắt — đúng 100%</span></div>
+        <div class="line bad"><span class="who">− FT λ=1.0</span><span class="txt">tuyến tộc cạch khựng lại cổ những gốc sắt</span></div>
+        <div class="diff-foot">Câu này trích từ một run λ=1.0 về sau — lần 1 không lưu predictions
+        VIVOS từng câu, nhưng cùng mức λ=1.0 và cùng tập VIVOS.</div>
+      </div>
+
+      <p class="body-text">Hai hiệu ứng này là hai mặt của cùng một nguyên nhân: biên độ thay đổi
+      trọng số quá lớn. Học được cái mới đi kèm drift khỏi năng lực gốc — chính câu mà model gốc
+      nghe đúng hoàn toàn thì bản fine-tune lại sai gần hết.</p>
+    </div>
+  </section>
+
+  <!-- 6 · dataset paid ................................. -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Lần 2 · Dataset <code>paid-dataset</code></h2>
+      <div class="meta">
+        <span class="badge">100% synthetic</span>
+        <span class="badge">kịch bản LLM + ElevenLabs eleven_v3</span>
+        <span class="badge">~48% code-switch</span>
+      </div>
+
+      <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Split</th><th class="num">Segment</th><th class="num">Giờ</th><th class="num">Meeting</th><th class="num">Giọng</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Train</td><td class="num">1,316</td><td class="num">1.57</td><td class="num">12</td><td class="num">10</td></tr>
+          <tr><td>Val</td><td class="num">250</td><td class="num">0.29</td><td class="num">3</td><td class="num">7</td></tr>
+          <tr><td>Test</td><td class="num">236</td><td class="num">0.31</td><td class="num">6</td><td class="num">10</td></tr>
+        </tbody>
+        <tfoot>
+          <tr><td>Tổng</td><td class="num">1,802</td><td class="num">2.18</td><td class="num">21</td><td class="num">10</td></tr>
+        </tfoot>
+      </table>
+      </div>
+
+      <div class="note">
+        <span class="note-title">Sửa được lỗi nhãn của dot1</span>
+        Nhãn khớp đúng audio — không còn chuyện "dạy model nghe sơ-vơ viết server".
+        Vì thế CER của model gốc trên bộ này chỉ <strong>5.11%</strong> (dot1: 29.65%),
+        tức bài toán khó hơn nhiều để cải thiện tiếp.
+      </div>
+
+      <div class="note">
+        <span class="note-title">Còn hai hạn chế</span>
+        (1) <strong>10 giọng ElevenLabs dùng chung cả 21 meeting</strong> — meeting rời nhau nhưng giọng
+        trùng hoàn toàn, nên test vẫn chỉ đo "giọng đã nghe, nội dung mới".
+        (2) Bộ tự mâu thuẫn cách viết số: 8.9% dòng viết chữ số, 19.0% viết bằng chữ.
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 · reworkwhisper-large-v3-0.5lamda results ...... -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2><code>reworkwhisper-large-v3-0.5lamda</code> — giảm biên độ, hết quên</h2>
+      <div class="meta">
+        <span class="badge">2026-07-30</span>
+        <span class="badge">LoRA r16 · thêm fc1, fc2</span>
+        <span class="badge solid">λ = 0.5</span>
+      </div>
+
+      <div class="models">
+        <div class="mrow"><span class="mk">Model nền</span><span class="mv">vinai/PhoWhisper-large</span></div>
+        <div class="mrow"><span class="mk">Model sản phẩm</span><span class="mv">winhsss/reworkwhisper-large-v3-0.5lamda</span></div>
+        <div class="mrow"><span class="mk">Cách tạo</span><span class="mv">base + 0.5·Δ <span class="dim">· Δ = reworkwhisper-large-v3 − PhoWhisper-large</span></span></div>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-val"><span class="from">2.96</span><span class="arr">→</span>1.65</div>
+          <div class="stat-key">CER% trong miền, đã tách phần học-viết-số · −44% là phần nghe thật</div>
+        </div>
+        <div class="stat">
+          <div class="stat-val"><span class="from">2.16</span><span class="arr">→</span>2.21</div>
+          <div class="stat-key">CER% VIVOS · ×1.02, gần như nguyên (lần 1: ×2.48)</div>
+        </div>
+      </div>
+
+      <p class="body-text">Fine-tune sinh ra một lượng thay đổi trọng số <code>Δ</code> cộng vào model gốc.
+      <strong>λ là hệ số nhân biên độ của <code>Δ</code></strong>: model cuối = <code>base + λ·Δ</code>.
+      <code>λ=1.0</code> áp dụng toàn bộ <code>Δ</code> (như lần 1), <code>λ=0.5</code> áp dụng một nửa biên độ.
+      Đổi λ <strong>không cần train lại</strong> — chỉ scale lại phần đã có, mất 0 giây.</p>
+
+      <div class="verdict">
+        <span class="v-label">Kết luận lần 2</span>
+        <p>Bằng chứng thứ hai: bug ở lần 1 <strong>sửa được</strong> — và fine-tune vẫn giữ được
+        phần lớn lợi ích khi sửa đúng cách.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 · reworkwhisper-large-v3 training curve ........ -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2><code>reworkwhisper-large-v3</code> — quá trình học</h2>
+      <div class="meta">
+        <span class="badge">run <code>v1c-r16-valfix</code></span>
+        <span class="badge">dừng ở step 175/246 · epoch 2.11</span>
+        <span class="badge solid">λ = 1.0</span>
+      </div>
+
+      <figure class="fig">
+        <img src="training-curves/reworkwhisper-large-v3_training-curve.png"
+             alt="Training curve của reworkwhisper-large-v3: train loss và val CER/WER theo epoch">
+        <figcaption class="fig-cap"><ul>
+          <li>Lần này đo trên <strong>val 250 câu tách rời test</strong> — đó là điểm sửa so với lần 1.
+          Nhãn đồ thị vì thế ghi "val", không phải "eval".</li>
+          <li><span class="warn">1.43% trên đồ thị không phải 1.65% ở slide trước.</span> Khác tập
+          (val 250 câu vs test 216 câu không chữ số) và khác λ (đồ thị là 1.0, model xuất bản là
+          0.5). Hai số gần nhau chỉ là trùng hợp.</li>
+          <li>Không overfit: val loss giảm đều 0.2394 → 0.0831, train loss cuối 0.0369, val CER đi
+          ngang chứ không quay đầu.</li>
+          <li>Early stopping dừng ở step 175/246 → cosine scheduler chưa anneal xong, LR bị cắt
+          giữa đà giảm. Chênh 1.43 ↔ 1.52 trên 250 câu chỉ là vài chục ký tự, tức nó bắn vào nhiễu.</li>
+        </ul></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- 9 · tradeoff method .............................. -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>λ và đánh đổi — phương pháp</h2>
+      <div class="meta"><span class="badge">áp dụng cho cả lần 2 và lần 3</span></div>
+
+      <p class="body-text"><strong>Đánh đổi ở đây là gì:</strong> fine-tune càng mạnh thì CER trong
+      miền càng giảm, nhưng model càng trôi khỏi năng lực nghe tiếng Việt tổng quát. Hai chiều này
+      đi ngược nhau. Câu hỏi không phải "fine-tune hay không" mà là <strong>fine-tune mạnh tới
+      đâu</strong> — và λ là núm điều chỉnh chính xác độ mạnh đó.</p>
+
+      <div class="models">
+        <div class="mrow"><span class="mk">LoRA cộng thêm</span><span class="mv">Δ = (α / r) · B @ A <span class="dim">· không sửa trọng số gốc</span></span></div>
+        <div class="mrow"><span class="mk">Model cuối</span><span class="mv">base + λ · Δ <span class="dim">· λ=0 là base, λ=1 là adapter nguyên biên độ</span></span></div>
+        <div class="mrow"><span class="mk">Cách scale</span><span class="mv">alpha ← λ · alpha <span class="dim">· B giữ bit-identical, không SVD, không sai số tái tạo</span></span></div>
+      </div>
+
+      <div class="cols2">
+      <p class="body-text"><strong>Đo:</strong> với mỗi λ trong grid, decode <strong>hai tập cùng
+      lúc</strong> — val trong miền để đo phần <em>được</em>, VIVOS ngoài miền để đo phần
+      <em>mất</em>. λ=0 chính là base nên nó tự làm điểm neo, không cần tin số base từ nguồn khác.</p>
+
+      <p class="body-text"><strong>Chọn:</strong> hai tầng. (1) <em>Ngân sách cứng</em> — λ nào đẩy
+      CER ngoài miền quá ngân sách thì loại; nếu không λ nào lọt thì <strong>fail hẳn</strong>,
+      không chọn adapter, không push. (2) <em>Luật khuỷu cost/benefit</em> — đi từ λ nhỏ lên, bước
+      nào có tỉ số ΔOOD/Δval vượt 10× tỉ số bước trước thì chặn tại đó.</p>
+      </div>
+
+      <div class="note">
+        <span class="note-title">Vì sao đáng làm</span>
+        Đổi λ <strong>không cần train lại</strong> — chỉ scale lại phần đã học, mất 0 giây. Một lần
+        train sinh ra cả một họ model để chọn.
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 · lambda tradeoff table ....................... -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Vì sao λ=0.5 là điểm dừng đúng</h2>
+      <div class="meta"><span class="badge">cùng một adapter, đo ở hai mức λ</span></div>
+
+      <div class="models">
+        <div class="mrow"><span class="mk">λ = 1.0</span><span class="mv">winhsss/reworkwhisper-large-v3 <span class="dim">· lặp lại đúng lỗi quên của lần 1 — VIVOS ×2.57</span></span></div>
+        <div class="mrow"><span class="mk">λ = 0.5</span><span class="mv">winhsss/reworkwhisper-large-v3-0.5lamda <span class="dim">· model chọn dùng — VIVOS ×1.02</span></span></div>
+      </div>
+
+      <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Tăng λ từ</th>
+            <th class="num">Được thêm<br>CER trong miền giảm</th>
+            <th class="num">Trả giá<br>CER VIVOS tăng</th>
+            <th class="num">Giá mỗi 1pp lợi</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>base → λ=0.5</td>
+            <td class="num">−3.46pp <em>(−67.6% CER base)</em></td>
+            <td class="num">+0.05pp <em>(2% tổng giá)</em></td>
+            <td class="num">0.013pp</td>
+          </tr>
+          <tr>
+            <td>λ=0.5 → λ=1.0</td>
+            <td class="num">−0.37pp <em>(−7.2% CER base)</em></td>
+            <td class="num">+2.12pp <em>(98% tổng giá)</em></td>
+            <td class="num">5.74pp</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+
+      <p class="body-text">Nửa dưới của thang λ (0 → 0.5) cho gần hết lợi ích và gần như không mất gì.
+      Nửa trên (0.5 → 1.0) cho rất ít lợi thêm nhưng gánh gần toàn bộ phần quên —
+      <strong>đắt hơn khoảng 440 lần</strong>. Lần 1 chạy ở λ=1.0 nên phải trả cả phần đắt đó.</p>
+
+      <div class="diff">
+        <div class="diff-head">ví dụ — giữ đúng thuật ngữ và cách viết số (test in-domain)</div>
+        <div class="line"><span class="who">ref</span><span class="txt">campaign … retention … 70%</span></div>
+        <div class="line bad"><span class="who">− base</span><span class="txt">cam pên … rì ten sừn … bảy mươi phần trăm</span></div>
+        <div class="line good"><span class="who">+ λ=0.5</span><span class="txt">đúng nguyên văn kể cả số — CER 0%</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11 · lan-2 tradeoff curve ........................ -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Lần 2 — đường cong đánh đổi</h2>
+      <div class="meta">
+        <span class="badge">8 mức λ · cùng một adapter</span>
+        <span class="badge">ngân sách OOD +0.2pp → trần 2.37%</span>
+      </div>
+
+      <figure class="fig">
+        <img src="training-curves/reworkwhisper-large-v3_lambda-tradeoff.png"
+             alt="Lần 2: đường cong đánh đổi giữa CER val và CER VIVOS theo λ">
+        <figcaption class="fig-cap"><ul>
+          <li>Mỗi điểm là một λ. Trục x = lỗi trong miền, trục y = lỗi ngoài miền,
+          <strong>góc dưới-trái là lý tưởng</strong>. Hình chữ L chính là kết quả: quan hệ
+          không tuyến tính.</li>
+          <li>λ=0.5 cho val 2.54% / VIVOS 2.21% — nằm ngay dưới trần. <strong>λ=0.6 đã vượt trần
+          (2.49%)</strong>, λ=1.0 bật lên 4.32% tức gấp đôi base. Ở lần này, ngân sách chặn thật.</li>
+          <li><span class="warn">Trục x là CER val, bảng ở slide trước là CER test.</span>
+          Val: 6.89 → 2.54 → 1.51. Test: 5.11 → 1.65 → 1.29. Không đọc các mức pp của bảng trực
+          tiếp trên trục x đồ thị.</li>
+          <li>Điểm vuông <code>attn-λ1.00</code> là một biến thể khác: chỉ scale attention, bỏ
+          <code>fc1</code>/<code>fc2</code>. Hướng này chưa khai thác tiếp.</li>
+        </ul></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- 12 · dataset paid-v2 ............................. -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Lần 3 · Dataset <code>paid-dataset-v2</code></h2>
+      <div class="meta">
+        <span class="badge">100% synthetic</span>
+        <span class="badge">ElevenLabs</span>
+        <span class="badge solid">train ×3.2 so với lần 2</span>
+      </div>
+
+      <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Split</th><th class="num">Segment</th><th class="num">Giờ</th><th class="num">Meeting</th><th class="num">Giọng</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Train</td><td class="num">4,270</td><td class="num">5.02</td><td class="num">40</td><td class="num">10</td></tr>
+          <tr><td>Val</td><td class="num">250</td><td class="num">0.29</td><td class="num">3</td><td class="num">7</td></tr>
+          <tr><td>Test</td><td class="num">426</td><td class="num">0.58</td><td class="num">3</td><td class="num">9</td></tr>
+        </tbody>
+        <tfoot>
+          <tr><td>Tổng</td><td class="num">4,946</td><td class="num">5.89</td><td class="num">46</td><td class="num">—</td></tr>
+        </tfoot>
+      </table>
+      </div>
+
+      <div class="note">
+        <span class="note-title">Sửa được hạn chế lớn nhất của lần 2: giọng train và test rời nhau hoàn toàn</span>
+        Không một giọng nào của test xuất hiện trong train (0 giọng trùng, kiểm tra trực tiếp trên
+        manifest của run). Đây là <strong>lần đầu con số test đo được khả năng tổng quát hoá sang giọng lạ</strong>,
+        không chỉ "giọng đã nghe, nội dung mới".
+      </div>
+
+      <div class="note">
+        <span class="note-title">Thêm một benchmark riêng bằng audio họp thật</span>
+        2 bản ghi họp thật, 43.2 phút, 264 segment — <strong>chỉ dùng để đo, không đưa vào train</strong>.
+        Đây là thước đo trung thực nhất cho use-case thật, và cũng là chỗ khó nhất (slide sau).
+      </div>
+    </div>
+  </section>
+
+  <!-- 13 · Reworkwhisper-large-v4 results .............. -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2><code>Reworkwhisper-large-v4</code> — kết quả hiện tại</h2>
+      <div class="meta">
+        <span class="badge">2026-08-04</span>
+        <span class="badge">LoRA r16 · α32 · rslora</span>
+        <span class="badge solid">λ = 0.5</span>
+      </div>
+
+      <div class="models">
+        <div class="mrow"><span class="mk">Model nền</span><span class="mv">vinai/PhoWhisper-large</span></div>
+        <div class="mrow"><span class="mk">Model sản phẩm</span><span class="mv">winhsss/Reworkwhisper-large-v4 <span class="dim">· mô hình mới nhất</span></span></div>
+        <div class="mrow"><span class="mk">Run</span><span class="mv">v3-r16 <span class="dim">· paid-dataset-v2 · 3 epoch · lr 2e-4</span></span></div>
+      </div>
+
+      <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Tập đánh giá</th>
+            <th class="num">Base</th>
+            <th class="num">λ=0.5</th>
+            <th class="res">Kết quả</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Trong miền — họp giả lập, <strong>giọng chưa từng nghe khi train</strong></td>
+            <td class="num">4.26</td>
+            <td class="num"><strong>1.96</strong></td>
+            <td class="res">✓ đạt</td>
+          </tr>
+          <tr>
+            <td>VIVOS — giọng thật đọc chuẩn, kiểm tra quên</td>
+            <td class="num">2.28</td>
+            <td class="num"><strong>2.49</strong></td>
+            <td class="res">✓ không quên</td>
+          </tr>
+          <tr>
+            <td>Họp thật — 2 bản ghi, 43.2 phút</td>
+            <td class="num">31.57</td>
+            <td class="num">29.06</td>
+            <td class="res">~ chưa kết luận</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+
+      <p class="body-text">Cùng công thức <code>λ=0.5</code> từ lần 2, áp dụng trên dataset lớn hơn và
+      đo chặt hơn: giảm hơn nửa CER trong miền <strong>trên giọng chưa từng nghe</strong>,
+      đồng thời không quên tiếng Việt nền. Không lặp lại lỗi của lần 1.</p>
+
+      <div class="note">
+        <span class="note-title">Dòng "họp thật" — domain khó nhất, được train ít nhất</span>
+        29.06 thấp hơn base 31.57, nhưng chỉ 2 bản ghi nên chưa đủ mẫu để khẳng định chắc chắn.
+        Nguyên nhân trực tiếp: dữ liệu train vẫn 100% giọng tổng hợp, chưa có audio họp thật nào.
+      </div>
+    </div>
+  </section>
+
+  <!-- 14 · lan-3 training curve ........................ -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Lần 3 — quá trình học <em>(adapter <code>v3-r16</code>, chưa scale λ)</em></h2>
+      <div class="meta">
+        <span class="badge">run <code>v3-r16</code></span>
+        <span class="badge">801 step · 3 epoch</span>
+        <span class="badge solid">đồ thị ở λ = 1.0</span>
+      </div>
+
+      <figure class="fig">
+        <img src="training-curves/Reworkwhisper-large-v4_training-curve.png"
+             alt="Lần 3 training curve: train loss, val CER và OOD CER theo epoch">
+        <figcaption class="fig-cap"><ul>
+          <li>Đỏ: val CER 1.19% → 1.05% → 1.01% (val 250 câu, đo mỗi epoch). Trục phải: train loss
+          <strong>log scale</strong> — loss chạy 31 → 0.06, để linear thì bước đầu nuốt hết phần
+          còn lại. Mean mỗi 25 step → 33 điểm.</li>
+          <li><span class="warn">Cam là CER VIVOS, không phải WER</span> — khác nghĩa với đường cam
+          ở đồ thị hai lần trước. Nó kết ở 4.20% so với base 2.28%, tức <strong>đọc trần ra là quên
+          nặng</strong>.</li>
+          <li><span class="warn">Đó là vì đồ thị này ở λ=1.0.</span> λ không tồn tại trong lúc train
+          — nó là phép scale hậu-train, nên mọi đường ở đây là adapter nguyên biên độ. Model xuất
+          bản ở λ=0.5 cho VIVOS 2.49%, đúng như bảng ở slide trước. <strong>Đường cam này chính là
+          lý do phải chọn λ</strong>, xem slide sau.</li>
+          <li>Không có val WER: log của run không ghi cột đó.</li>
+        </ul></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- 15 · lan-3 tradeoff curve ........................ -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Lần 3 — đường cong đánh đổi và λ được chọn</h2>
+      <div class="meta">
+        <span class="badge">5 mức λ · cùng một adapter</span>
+        <span class="badge">ngân sách OOD +2.0pp → trần 4.28%</span>
+        <span class="badge solid">chọn λ = 0.5</span>
+      </div>
+
+      <div class="split">
+      <figure class="fig">
+        <img src="training-curves/Reworkwhisper-large-v4_lambda-tradeoff.png"
+             alt="Lần 3: đường cong đánh đổi giữa CER val và CER VIVOS theo λ">
+      </figure>
+
+      <div class="note">
+        <span class="note-title">Khác lần 2: ở lần này ngân sách KHÔNG phải thứ chặn λ</span>
+        Cả 5 mức λ đều nằm trong ngân sách — λ=1.0 cho 4.14%, vẫn dưới trần 4.28%. Nên luật cũ
+        "lấy λ lớn nhất còn trong ngân sách" chọn λ=1.0, và lần chạy gốc <strong>đã chọn λ=1.0
+        thật</strong>. Thứ chặn ở đây là luật khuỷu: tỉ số ΔOOD/Δval ở bước 0.5→0.75 là 1.95, vượt
+        10× tỉ số bước trước (0.155) → chặn, λ=0.5 thắng. Cột cuối của bảng là toàn bộ luận điểm:
+        <strong>giá mỗi đơn vị lợi tăng gần 300 lần</strong> từ đầu grid tới cuối.
+      </div>
+      </div>
+
+      <div class="table-wrap">
+      <table class="dense">
+        <thead>
+          <tr><th class="num">λ</th><th class="num">CER val</th><th class="num">CER VIVOS</th>
+          <th class="num">Δ được</th><th class="num">Δ trả</th><th class="num">Giá mỗi 1pp lợi</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="num">0 (base)</td><td class="num">5.83</td><td class="num">2.28</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>
+          <tr><td class="num">0.25</td><td class="num">2.56</td><td class="num">2.34</td><td class="num">−3.27pp</td><td class="num">+0.06pp</td><td class="num">0.017</td></tr>
+          <tr><td class="num"><strong>0.5</strong></td><td class="num"><strong>1.60</strong></td><td class="num"><strong>2.49</strong></td><td class="num">−0.96pp</td><td class="num">+0.15pp</td><td class="num">0.155</td></tr>
+          <tr><td class="num">0.75</td><td class="num">1.20</td><td class="num">3.26</td><td class="num">−0.40pp</td><td class="num">+0.77pp</td><td class="num">1.95</td></tr>
+          <tr><td class="num">1.0</td><td class="num">1.02</td><td class="num">4.14</td><td class="num">−0.18pp</td><td class="num">+0.88pp</td><td class="num">4.98</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 16 · score table ................................. -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Bảng điểm — so với số công bố của PhoWhisper</h2>
+      <div class="meta">
+        <span class="badge">VIVOS: ngoài miền, kiểm tra quên</span>
+        <span class="badge">trong miền: họp giả lập</span>
+        <span class="badge">% · thấp hơn tốt hơn</span>
+      </div>
+
+      <div class="table-wrap">
+      <table class="dense grid">
+        <colgroup>
+          <col style="width:15%"><col style="width:12%">
+          <col style="width:6.5%"><col style="width:11%">
+          <col style="width:6.5%"><col style="width:10.5%"><col style="width:11%">
+          <col style="width:6.5%"><col style="width:10%"><col style="width:11%">
+        </colgroup>
+        <thead>
+          <tr>
+            <th rowspan="2">Bộ test</th>
+            <th class="gsep">Paper</th>
+            <th class="gsep" colspan="2">Lần 1 · <code>dataset-dot1</code> · n=500</th>
+            <th class="gsep" colspan="3">Lần 2 · <code>paid-dataset</code> · n=236</th>
+            <th class="gsep" colspan="3">Lần 3 · <code>paid-dataset-v2</code> · n=426</th>
+          </tr>
+          <tr class="mh">
+            <th class="gsep"><code>vinai/PhoWhisper-large</code></th>
+            <th class="gsep">base</th>
+            <th><code>reworkwhisper-large-v1</code></th>
+            <th class="gsep">base</th>
+            <th><code>reworkwhisper-large-v3</code></th>
+            <th><code>reworkwhisper-large-v3-0.5lamda</code> <em>← xuất bản</em></th>
+            <th class="gsep">base</th>
+            <th>adapter <code>v3-r16</code> <em>chưa publish</em></th>
+            <th><code>Reworkwhisper-large-v4</code> <em>← xuất bản</em></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="lam">
+            <th scope="row">λ</th>
+            <td class="num gsep">—</td>
+            <td class="num gsep">—</td><td class="num">1.0</td>
+            <td class="num gsep">—</td><td class="num">1.0</td><td class="num">0.5</td>
+            <td class="num gsep">—</td><td class="num">1.0</td><td class="num">0.5</td>
+          </tr>
+          <tr>
+            <th scope="row">VIVOS · CER <em>ngoài miền</em></th>
+            <td class="num gsep">—</td>
+            <td class="num gsep">1.78</td><td class="num">4.42</td>
+            <td class="num gsep">2.16</td><td class="num">4.32</td><td class="num"><strong>2.21</strong></td>
+            <td class="num gsep">2.28</td><td class="num">4.14</td><td class="num"><strong>2.49</strong></td>
+          </tr>
+          <tr>
+            <th scope="row">VIVOS · WER</th>
+            <td class="num gsep"><strong>4.67</strong></td>
+            <td class="num gsep">4.57</td><td class="num">8.12</td>
+            <td class="num gsep">4.61</td><td class="num">—</td><td class="num"><strong>4.75</strong></td>
+            <td class="num gsep">4.73</td><td class="num">8.74</td><td class="num"><strong>—</strong></td>
+          </tr>
+          <tr>
+            <th scope="row">Trong miền · CER <em>họp giả lập</em></th>
+            <td class="num gsep"></td>
+            <td class="num gsep">29.65</td><td class="num"><strong>18.53</strong></td>
+            <td class="num gsep">5.11</td><td class="num">1.29</td><td class="num"><strong>1.65</strong></td>
+            <td class="num gsep">4.26</td><td class="num">1.71</td><td class="num"><strong>1.96</strong></td>
+          </tr>
+          <tr>
+            <th scope="row">Trong miền · WER</th>
+            <td class="num gsep"></td>
+            <td class="num gsep">47.02</td><td class="num"><strong>26.92</strong></td>
+            <td class="num gsep">8.29</td><td class="num">2.56</td><td class="num"><strong>3.19</strong></td>
+            <td class="num gsep">7.40</td><td class="num">2.50</td><td class="num"><strong>2.97</strong></td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+
+      <div class="note cols2">
+        <span class="note-title">Ba chỗ dễ hiểu sai</span>
+        <p>(1) <strong>Paper không công bố CER, chỉ WER</strong> — muốn so với cột Paper thì phải đọc
+        hàng WER.</p>
+        <p>(2) Hai hàng "trong miền" <strong>không so được ngang giữa ba lần</strong> vì ba dataset
+        khác nhau; mỗi lần có cột base riêng để so dọc trong cùng lần đó.</p>
+        <p>(3) Cùng một model base, ba lần đo VIVOS ra ba số (1.78 / 2.16 / 2.28) vì ba cách nạp
+        dữ liệu khác nhau — <strong>đừng trừ số tuyệt đối giữa các nhóm cột</strong>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 17 · ratio table ................................. -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Tỉ lệ so với base — cách duy nhất so được giữa ba lần</h2>
+      <div class="meta"><span class="badge">mỗi lần chia cho base của chính nó</span></div>
+
+      <div class="table-wrap">
+      <table class="dense">
+        <thead>
+          <tr><th>Model</th><th class="num">λ</th><th class="num">VIVOS</th><th class="num">Trong miền</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="model"><code>reworkwhisper-large-v1</code></td><td class="num">1.0</td><td class="num">×2.48 ❌</td><td class="num">−37.5%</td></tr>
+          <tr><td class="model"><code>reworkwhisper-large-v3</code></td><td class="num">1.0</td><td class="num">×2.00 ❌</td><td class="num">−74.8%</td></tr>
+          <tr><td class="model"><code>reworkwhisper-large-v3-0.5lamda</code></td><td class="num">0.5</td><td class="num"><strong>×1.02 ✓</strong></td><td class="num"><strong>−67.6%</strong></td></tr>
+          <tr><td class="model">adapter <code>v3-r16</code></td><td class="num">1.0</td><td class="num">×1.81 ❌</td><td class="num">−59.8%</td></tr>
+          <tr><td class="model"><code>Reworkwhisper-large-v4</code></td><td class="num">0.5</td><td class="num"><strong>×1.09 ✓</strong></td><td class="num"><strong>−54.0%</strong></td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <div class="cols2">
+      <p class="body-text"><strong>1 · Số của chúng tôi đúng.</strong> Paper nói VIVOS WER 4.67;
+      chúng tôi đo lại base ra 4.57 / 4.61 / 4.73 qua ba pipeline. Lệch tối đa 0.10pp — đây là căn
+      cứ để tin phần còn lại của bảng.</p>
+
+      <p class="body-text"><strong>2 · λ=1.0 luôn làm model quên.</strong> ×2.48 · ×2.00 · ×1.81.
+      Ba lần, hai dataset. Không phải tai nạn của một lần chạy.</p>
+
+      <p class="body-text"><strong>3 · λ=0.5 chữa được.</strong> ×1.02 và ×1.09 — gần như bằng base,
+      trong khi vẫn giữ hơn nửa phần lợi trong miền.</p>
+
+      <p class="body-text"><strong>4 · <code>Reworkwhisper-large-v4</code> chắc nhất.</strong> Giảm
+      hơn nửa CER trong miền, và là model duy nhất mà <strong>giọng test không có trong train</strong>
+      — hai model trước đo trên giọng đã nghe.</p>
+      </div>
+
+      <div class="note cols2">
+        <span class="note-title">Để định vị mức suy giảm</span>
+        <p>Trên cùng VIVOS, <code>PhoWhisper-medium</code> đạt 1.85 CER và
+        <code>PhoWhisper-small</code> đạt 2.22 CER.</p>
+        <p>Nghĩa là ở λ=1.0, bản large fine-tune (4.14–4.42) <strong>tệ hơn cả bản small 244M chưa
+        fine-tune</strong>. Ở λ=0.5 thì không.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 18 · summary ..................................... -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Tóm lại</h2>
+      <div class="sumrows">
+        <div class="sumrow">
+          <div class="k">23/07</div>
+          <div class="v"><strong>Chứng minh học được</strong> — và lộ ra bug quên kiến thức nền.<br>
+          <code>winhsss/reworkwhisper-large-v1</code>
+          <em>· dataset-dot1 · 1,347 segment train · giọng trùng split</em></div>
+        </div>
+        <div class="sumrow">
+          <div class="k">30/07</div>
+          <div class="v"><strong>Chứng minh sửa được</strong> — λ=0.5 giữ lợi ích, hết quên.<br>
+          <code>winhsss/reworkwhisper-large-v3-0.5lamda</code>
+          <em>· paid-dataset · 1,316 segment train · nhãn đã sửa, giọng vẫn trùng</em></div>
+        </div>
+        <div class="sumrow">
+          <div class="k">04/08</div>
+          <div class="v"><strong>Thành quả hiện tại</strong> — lặp lại tốt trên dataset lớn hơn,
+          lần đầu đo được giọng lạ.<br>
+          <code>winhsss/Reworkwhisper-large-v4</code>
+          <em>· paid-dataset-v2 · 4,270 segment train · giọng rời nhau hoàn toàn</em></div>
+        </div>
+      </div>
+      <blockquote>
+        Việc còn lại: bổ sung audio họp thật vào tập train — đó là trục duy nhất chưa được chạm tới,
+        và là chỗ duy nhất kết quả còn chưa kết luận được.
+      </blockquote>
+    </div>
+  </section>
+
+</div>
+
+<div class="chrome">
+  <span class="counter"><span id="cur">1</span> / <span id="total">18</span></span>
+  <span class="hint">← → chuyển slide · F toàn màn hình</span>
+  <span class="nav">
+    <button type="button" id="prev" aria-label="Slide trước">←</button>
+    <button type="button" id="next" aria-label="Slide sau">→</button>
+  </span>
+</div>
+
+<script>
+(function(){
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var cur = 0;
+  var curEl = document.getElementById('cur');
+  var progress = document.getElementById('progress');
+  document.getElementById('total').textContent = slides.length;
+
+  function show(i){
+    cur = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach(function(s, n){ s.classList.toggle('active', n === cur); });
+    curEl.textContent = cur + 1;
+    progress.style.width = ((cur + 1) / slides.length * 100) + '%';
+    if (location.hash !== '#' + (cur + 1)) history.replaceState(null, '', '#' + (cur + 1));
+  }
+
+  document.getElementById('next').addEventListener('click', function(){ show(cur + 1); });
+  document.getElementById('prev').addEventListener('click', function(){ show(cur - 1); });
+
+  document.addEventListener('keydown', function(e){
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    switch(e.key){
+      case 'ArrowRight': case 'ArrowDown': case ' ': case 'PageDown':
+        e.preventDefault(); show(cur + 1); break;
+      case 'ArrowLeft': case 'ArrowUp': case 'PageUp':
+        e.preventDefault(); show(cur - 1); break;
+      case 'Home': e.preventDefault(); show(0); break;
+      case 'End': e.preventDefault(); show(slides.length - 1); break;
+      case 'f': case 'F':
+        e.preventDefault();
+        if (document.fullscreenElement) document.exitFullscreen();
+        else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+        break;
+    }
+  });
+
+  var startX = null;
+  document.addEventListener('touchstart', function(e){ startX = e.touches[0].clientX; }, {passive:true});
+  document.addEventListener('touchend', function(e){
+    if (startX === null) return;
+    var dx = e.changedTouches[0].clientX - startX;
+    if (Math.abs(dx) > 50) show(cur + (dx < 0 ? 1 : -1));
+    startX = null;
+  }, {passive:true});
+
+  var start = parseInt((location.hash || '').slice(1), 10);
+  show(isNaN(start) ? 0 : start - 1);
+})();
+</script>
+</body>
+</html>

@@ -17,3 +17,4 @@ accelerate         # transitive via Trainer, pinned here so it is visible
 
 # Dev
 pytest
+matplotlib         # scripts/plot_training_curve.py only, not used by src/
