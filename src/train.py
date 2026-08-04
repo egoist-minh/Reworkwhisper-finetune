@@ -191,6 +191,7 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
 
         def __init__(self):
             self.bar = None
+            self.eval_bar = None
             self.last_train_loss = None
             self._pending = {}
 
@@ -201,6 +202,18 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
             tqdm.write(self._ROW_FMT.format(
                 "Epoch", "Step", "TrainLoss", "ValLoss", "ValCER", "ValWER", "OOD_CER"
             ))
+
+        def on_prediction_step(self, args, state, control, **kwargs):
+            # eval_dataset is {"val":.., "ood":..} -- "ood" keys only land in
+            # _pending once val's on_evaluate has already fired, so an empty
+            # _pending means the val split is the one currently decoding.
+            if self.eval_bar is None:
+                from tqdm.auto import tqdm
+
+                split = "ood" if self._pending else "val"
+                self.eval_bar = tqdm(desc=f"eval:{split}", unit="batch",
+                                      position=1, leave=False)
+            self.eval_bar.update(1)
 
         def on_log(self, args, state, control, logs=None, **kwargs):
             if logs and "loss" in logs:
@@ -213,6 +226,9 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
                 self.bar.update(1)
 
         def on_evaluate(self, args, state, control, metrics=None, model=None, **kwargs):
+            if self.eval_bar is not None:
+                self.eval_bar.close()
+                self.eval_bar = None
             if not metrics:
                 return control
             self._pending.update(metrics)
