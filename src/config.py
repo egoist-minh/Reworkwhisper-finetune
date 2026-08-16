@@ -160,6 +160,15 @@ def validate(cfg: Config) -> None:
         raise ValueError("eval.limit must be a positive int or null")
     if cfg.training.limit is not None and cfg.training.limit <= 0:
         raise ValueError("training.limit must be a positive int or null")
+    # PyYAML is YAML 1.1: a float literal needs a decimal point, so
+    # `--override training.learning_rate=5e-05` resolves to the *string* "5e-05"
+    # and nothing catches it until AdamW compares it to a float, ~200 frames into
+    # trainer.train() with the model already on the GPU. Caught live on Kaggle.
+    if not isinstance(cfg.training.learning_rate, (int, float)):
+        raise ValueError(
+            f"training.learning_rate is {cfg.training.learning_rate!r}, a "
+            f"{type(cfg.training.learning_rate).__name__} -- YAML needs a decimal "
+            "point to read a float, so write 5.0e-05 or 0.00005, not 5e-05")
     if not (0.0 < cfg.lora.min_retained_energy <= 1.0):
         raise ValueError("lora.min_retained_energy must be in (0, 1]")
     if not cfg.sweep.lambdas:

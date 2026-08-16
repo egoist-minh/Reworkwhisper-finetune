@@ -47,6 +47,20 @@ def probe_run_id(base_run_id: str, lr: float) -> str:
     return f"{base_run_id}-lr{lr:g}"
 
 
+def yaml_float(x: float) -> str:
+    """Decimal form, because `--override` values go through `yaml.safe_load` and
+    PyYAML follows YAML 1.1: a float literal needs a decimal point, so `5e-05`
+    resolves to the *string* "5e-05". Nothing downstream type-checks it and the
+    failure lands 200 frames later inside AdamW as
+    `'<=' not supported between instances of 'float' and 'str'`."""
+    s = f"{x:.12f}".rstrip("0")
+    s = s + "0" if s.endswith(".") else s
+    if float(s) != x:
+        raise ValueError(f"{x!r} does not survive 12-decimal formatting (got {s}) -- "
+                         "too small for this grid")
+    return s
+
+
 def run_one(config: Path, run_id: str, lr: float, limit: int, epochs: int,
             source_run: Path, extra_overrides: list[str], extra_args: list[str]) -> Path:
     """Train once at `lr`. Returns the path to that run's training.csv."""
@@ -79,7 +93,7 @@ def run_one(config: Path, run_id: str, lr: float, limit: int, epochs: int,
     # OVERRIDES string does exactly that) would silently pin every probe to the
     # same LR and the whole sweep would read as noise.
     for o in (f"run_id={run_id}",
-              f"training.learning_rate={lr}",
+              f"training.learning_rate={yaml_float(lr)}",
               f"training.limit={limit}",
               f"training.epochs={epochs}"):
         cmd += ["--override", o]
