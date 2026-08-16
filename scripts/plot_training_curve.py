@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 
 
 def read_training_csv(path):
-    steps, loss, val = [], [], []
+    steps, loss, val, val_loss = [], [], [], []
     with open(path, encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             step = int(row["step"])
@@ -26,7 +26,9 @@ def read_training_csv(path):
                 loss.append(float(row["loss"]))
             if row["eval_val_cer"]:
                 val.append((step, float(row["eval_val_cer"]) * 100))
-    return steps, loss, val
+            if row.get("eval_val_loss"):
+                val_loss.append((step, float(row["eval_val_loss"])))
+    return steps, loss, val, val_loss
 
 
 def read_ood(run_dir):
@@ -62,7 +64,7 @@ def main():
                          "as forgetting -- the tradeoff curve tells that part properly)")
     args = ap.parse_args()
 
-    steps, loss, val = read_training_csv(args.run_dir / "metrics" / "training.csv")
+    steps, loss, val, val_loss = read_training_csv(args.run_dir / "metrics" / "training.csv")
     ood = [] if args.no_ood else read_ood(args.run_dir)
     steps_per_epoch = val[0][0] if val else max(steps)
 
@@ -88,6 +90,12 @@ def main():
     ax2.plot([ep(s) for s, _ in blocks], [l for _, l in blocks],
              color="#7d8b99", linewidth=1.4, marker=".", markersize=4,
              label=f"train loss (per {args.every} steps)")
+    if val_loss:
+        # Same axis as train loss (both are loss, unlike the error-% lines on ax) --
+        # this is the line that shows overfitting: train loss keeps dropping while
+        # val loss turns back up (see docs/training-curves/README.md).
+        ax2.plot([ep(s) for s, _ in val_loss], [l for _, l in val_loss],
+                 "d--", color="#8e44ad", linewidth=1.4, markersize=5, label="val loss")
     ax2.tick_params(axis="y", colors="#7d8b99")
 
     best_step, best_cer = min(val, key=lambda t: t[1])
@@ -102,7 +110,8 @@ def main():
     fig.tight_layout()
     args.out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out)
-    print(f"wrote {args.out}  ({len(steps)} loss pts, {len(val)} val, {len(ood)} ood)")
+    print(f"wrote {args.out}  ({len(steps)} loss pts, {len(val)} val, {len(ood)} ood, "
+          f"{len(val_loss)} val_loss)")
 
 
 if __name__ == "__main__":

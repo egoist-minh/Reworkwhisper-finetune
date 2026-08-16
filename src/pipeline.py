@@ -21,11 +21,63 @@ each stage assumes prior stages' artifacts already exist on disk):
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
 from src.config import load, freeze
 from src.normalize import Normalizer
+
+
+def select_lambda(sweep_rows: list[dict], baseline_ood_cer: float,
+                   ood_cer_budget: float, elbow_ratio_threshold: float) -> float:
+    """Cost/benefit lambda selection (PROJECT_CORE.md §6 Stage 3, SESSIONS.md E2).
+
+    Replaces "largest lambda within the OOD budget": that rule picked
+    lambda=1.0 on v3-r16's own sweep even though 1.0 sits well past the point
+    where diminishing val-CER gains start costing disproportionate OOD
+    regression (catastrophic-forgetting territory, see docs/finetune-results-report-v3.md).
+
+    Walks `sweep_rows` in ascending lambda order. A lambda still must keep
+    ood_cer within `ood_cer_budget` of `baseline_ood_cer` (hard constraint --
+    no soft fallback, CLAUDE.md). Among budget-safe candidates, stop
+    advancing once a step's marginal cost/benefit ratio
+    (delta_ood_cer / delta_val_cer vs. the previous grid point) exceeds
+    `elbow_ratio_threshold` times the previous step's own ratio -- that step
+    and every larger lambda are rejected, and the last accepted lambda wins.
+
+    Raises if no lambda in the grid is budget-safe (mirrors the previous
+    hard-fail contract).
+    """
+    rows = sorted((r for r in sweep_rows if r["ood_cer"] is not None),
+                  key=lambda r: r["lambda"])
+
+    best = None
+    prev_ratio = None
+    prev = None  # (val_cer, ood_cer) of the last ACCEPTED row
+    for row in rows:
+        lam, val_cer, ood_cer = row["lambda"], row["val_cer"], row["ood_cer"]
+        if ood_cer > baseline_ood_cer + ood_cer_budget:
+            break  # out of budget -- stop, this and every larger lambda are worse
+
+        if prev is not None:
+            delta_val = prev[0] - val_cer
+            delta_ood = ood_cer - prev[1]
+            ratio = delta_ood / delta_val if delta_val > 0 else math.inf
+            if prev_ratio is not None and ratio > prev_ratio * elbow_ratio_threshold:
+                break  # elbow: marginal cost/benefit blew past the previous step
+            prev_ratio = ratio
+
+        best = lam
+        prev = (val_cer, ood_cer)
+
+    if best is None:
+        raise RuntimeError(
+            "select_lambda: no lambda in cfg.sweep.lambdas keeps OOD CER within "
+            f"ood_cer_budget={ood_cer_budget} of baseline ({baseline_ood_cer}) -- "
+            "HARD FAIL, no adapter selected, no push."
+        )
+    return best
 
 
 def _write_state(out_dir: Path, stage: str) -> None:
@@ -159,7 +211,7 @@ def stage_train(cfg) -> Path:
 def stage_sweep_gate(cfg) -> Path:
     from src.data import ManifestDataset, load_manifests
     from src.asr import load_for_eval
-    from src.gate import run_gate, write_gate_results, _eval_split
+    from src.gate import run_gate, write_gate_results, _eval_split, _meeting_to_source
     from src.lora import set_lambda, save_with_lambda
 
     out = cfg.out_dir
@@ -183,29 +235,26 @@ def stage_sweep_gate(cfg) -> Path:
 
     model, processor = load_for_eval(cfg.base_model, checkpoint_dir)
 
+    val_meeting_to_source = _meeting_to_source(val_ds.records)
     sweep_rows = []
-    best_lambda = None
     for lam in cfg.sweep.lambdas:
         set_lambda(model, lam)
-        val_cer = _eval_split(model, processor, val_ds, normalizer, cfg.eval,
-                               desc=f"sweep:lambda={lam}:val")["cer"]
+        val_metrics = _eval_split(model, processor, val_ds, normalizer, cfg.eval,
+                                   desc=f"sweep:lambda={lam}:val")
+        val_cer_by_source = _cer_by_source(val_metrics["_predictions"], val_meeting_to_source)
         ood_cer = (_eval_split(model, processor, ood_ds, normalizer, cfg.eval,
                                 desc=f"sweep:lambda={lam}:ood")["cer"]
                    if ood_ds is not None else None)
-        row = {"lambda": lam, "val_cer": val_cer, "ood_cer": ood_cer}
-        sweep_rows.append(row)
-        if ood_cer is not None and ood_cer <= baseline.get("cer_ood", float("inf")) + cfg.sweep.ood_cer_budget:
-            if best_lambda is None or lam > best_lambda:
-                best_lambda = lam
+        sweep_rows.append({
+            "lambda": lam, "val_cer": val_metrics["cer"], "ood_cer": ood_cer,
+            "val_cer_synthetic": val_cer_by_source.get("synthetic"),
+            "val_cer_youtube": val_cer_by_source.get("youtube"),
+        })
 
     _write_sweep_csv(sweep_rows, out / "metrics" / "lambda_sweep.csv")
 
-    if best_lambda is None:
-        raise RuntimeError(
-            "sweep-gate: no lambda in cfg.sweep.lambdas keeps OOD CER within "
-            f"cfg.sweep.ood_cer_budget={cfg.sweep.ood_cer_budget} of baseline "
-            f"({baseline.get('cer_ood')}) -- HARD FAIL, no adapter selected, no push."
-        )
+    best_lambda = select_lambda(sweep_rows, baseline.get("cer_ood", float("inf")),
+                                 cfg.sweep.ood_cer_budget, cfg.sweep.elbow_ratio_threshold)
 
     adapter_dir = save_with_lambda(model, best_lambda, out / "adapter")
 
@@ -221,8 +270,9 @@ def stage_sweep_gate(cfg) -> Path:
                                    audio_root=Path(cfg.data.real_bench_path) / "audio")
 
     baseline_real_csv = out / "audit" / "predictions_baseline_real.csv"
+    baseline_test_csv = out / "audit" / "predictions_baseline_test.csv"
     results = run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseline,
-                        baseline_real_csv=baseline_real_csv)
+                        baseline_real_csv=baseline_real_csv, baseline_test_csv=baseline_test_csv)
     gate_path = write_gate_results(results, out)
 
     if results["overall_pass"] and cfg.hub.push:
@@ -241,12 +291,27 @@ def load_manifests_from_validated(out_dir: Path) -> list[dict]:
     return [r for r in records if r["split"] == "val"]
 
 
+def _cer_by_source(predictions: list[dict], meeting_to_source: dict[str, str]) -> dict[str, float]:
+    """val CER per `source` slice (synthetic/youtube) -- for `lambda_sweep.csv`'s
+    per-slice columns, so it's visible which slice drove a given lambda's selection
+    (PROJECT_CORE.md, mixed-noisy-v1 plan). Reuses the same `_predictions` the sweep
+    loop already decoded -- no extra GPU cost."""
+    from src.metrics import score
+
+    by_source: dict[str, list[dict]] = {}
+    for row in predictions:
+        by_source.setdefault(meeting_to_source[row["meeting_id"]], []).append(row)
+    return {src: score([r["ref"] for r in rows], [r["hyp"] for r in rows])["cer"]
+            for src, rows in by_source.items()}
+
+
 def _write_sweep_csv(rows: list[dict], out_path: Path) -> Path:
     import csv
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    fields = ["lambda", "val_cer", "ood_cer", "val_cer_synthetic", "val_cer_youtube"]
     with open(out_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["lambda", "val_cer", "ood_cer"])
+        writer = csv.DictWriter(f, fieldnames=fields, restval="")
         writer.writeheader()
         writer.writerows(rows)
     return out_path

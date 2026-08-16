@@ -35,6 +35,22 @@ MIN_SILENCE_SEC = 0.3
 FRAME_MS = 30
 HOP_MS = 15
 SILENCE_PERCENTILE = 15
+# Ceiling on chars/sec for a genuine Vietnamese speech segment. Corpus' worst
+# real segment measures 39.5 chars/sec (a very short 0.38s burst); a mis-split
+# rejoin artifact (proportional text split desynced from its audio chunk) can
+# measure 400+ chars/sec. 60.0 leaves headroom above real speech while still
+# catching that class of bug.
+MAX_CHARS_PER_SEC = 60.0
+
+
+def _check_speech_rate(meeting_id: str, seg_id: str, text: str, duration: float) -> None:
+    rate = len(text) / duration if duration > 0 else math.inf
+    if rate > MAX_CHARS_PER_SEC:
+        raise ValueError(
+            f"{meeting_id}/{seg_id}: implausible speech rate {rate:.1f} chars/sec "
+            f"({len(text)} chars over {duration:.2f}s) exceeds MAX_CHARS_PER_SEC="
+            f"{MAX_CHARS_PER_SEC} -- likely a mis-split/rejoin artifact, not real speech"
+        )
 
 
 def _rms_frames(audio: np.ndarray, sr: int) -> tuple[np.ndarray, int]:
@@ -166,6 +182,8 @@ def ingest_recording(draft_path: Path, wav_16k_path: Path, meeting_id: str,
 
         for j, (chunk_audio, chunk_text) in enumerate(chunks):
             seg_id = f"seg_{i:04d}" if len(chunks) == 1 else f"seg_{i:04d}_{j}"
+            chunk_duration = len(chunk_audio) / sr
+            _check_speech_rate(meeting_id, seg_id, chunk_text, chunk_duration)
             wav_name = f"{seg_id}.wav"
             sf.write(audio_dir / wav_name, chunk_audio, sr)
             records.append({
@@ -173,7 +191,7 @@ def ingest_recording(draft_path: Path, wav_16k_path: Path, meeting_id: str,
                 "meeting_id": meeting_id,
                 "segment_id": seg_id,
                 "speaker": seg.get("speaker"),
-                "duration": len(chunk_audio) / sr,
+                "duration": chunk_duration,
                 "text": chunk_text,
                 "lang": "vi",
                 "source": "real",

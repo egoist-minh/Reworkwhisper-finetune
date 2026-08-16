@@ -282,7 +282,8 @@ def _write_training_csv(log_history: list[dict], out_path: Path) -> Path:
     import csv
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fields = ["step", "loss", "learning_rate", "eval_val_cer", "eval_ood_cer"]
+    fields = ["step", "loss", "learning_rate", "eval_val_loss", "eval_val_cer",
+              "eval_val_wer", "eval_ood_cer"]
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()

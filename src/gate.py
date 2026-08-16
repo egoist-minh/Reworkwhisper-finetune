@@ -35,6 +35,30 @@ baseline/gate stages -- no new real audio needed:
     since without it a tier1 CER gain can't be attributed between digit-
     normalization and actual acoustic learning).
 
+`by_source` (added for the mixed-noisy-v1 run, plan "quan trọng nhất để đọc kết
+quả cho đúng"): tier1_in_domain now pools synthetic and YouTube-real segments
+into one CER, but YouTube segments average 220 chars vs. synthetic's 80, so a
+pooled test-set CER is character-weighted toward YouTube (measured on the
+mixed-noisy-v1 test split: 50,082 YouTube chars vs. 33,904 synthetic, i.e.
+59.6% of the pooled denominator from 34.9% of the segments) even though it is a
+minority of segments. `_score_by_source` reports `cer`/`wer`/`n_segments`/
+`char_ref_len`/`ci` per `source` slice, plus `cer_baseline`/`ci_baseline` (the
+same two functions applied to the matching slice of
+`audit/predictions_baseline_test.csv`, computed here rather than trusted from
+`metrics/baseline.json` -- that file only has the pooled CER, so two places
+computing the same number is two places that can drift) and `delta_ci`/
+`verdict` (paired bootstrap on the same slice).
+
+Per-source pass/fail (2026-08-16): the pooled bound alone lets one slice carry
+the tier -- at a 59.6%/40.4% character split, a large gain on YouTube can hold
+the pooled CER under the bound while the synthetic slice regresses, and the
+tier still reads "pass". Each slice therefore gets the SAME rule as the pooled
+test set (`cer <= (1 - min_improvement_pct/100) * cer_baseline` on its own
+slice), and tier 1 passes only if the pooled bound AND every slice pass. A
+slice whose baseline is unavailable (`predictions_baseline_test.csv` missing,
+or a segment-count mismatch) carries no `pass` key and cannot fail the tier --
+the pooled rule alone applies, same as before this change.
+
 Rejoin-before-scoring (found 2026-08-04 reading v3-r16's tier4a audit):
 `scripts/ingest_real_bench.py` splits any real-bench segment over 30s into
 sub-chunks, cutting audio at real silence but dividing the *text* only
@@ -93,6 +117,63 @@ def _score_by_meeting(predictions: list[dict]) -> dict:
     return result
 
 
+def _meeting_to_source(records: list[dict]) -> dict[str, str]:
+    return {r["meeting_id"]: r["source"] for r in records}
+
+
+def _score_by_source(predictions: list[dict], meeting_to_source: dict[str, str],
+                      baseline_rows: list[dict] | None,
+                      min_improvement_pct: float | None = None) -> dict:
+    """Per-`source` (synthetic/youtube) breakdown for tier1_in_domain -- see module
+    docstring "by_source". `baseline_rows`: parsed `predictions_baseline_test.csv`
+    rows (or None if that file doesn't exist). `min_improvement_pct`: when given
+    and the slice's baseline is available, adds `bound`/`pass` applying tier 1's
+    own rule to that slice alone (module docstring, "Per-source pass/fail")."""
+    by_source: dict[str, list[dict]] = {}
+    for row in predictions:
+        by_source.setdefault(meeting_to_source[row["meeting_id"]], []).append(row)
+
+    baseline_by_source: dict[str, list[dict]] = {}
+    if baseline_rows is not None:
+        for row in baseline_rows:
+            baseline_by_source.setdefault(meeting_to_source[row["meeting_id"]], []).append(row)
+
+    result = {}
+    for source, rows in by_source.items():
+        s = score([r["ref"] for r in rows], [r["hyp"] for r in rows])
+        cc = s.pop("_char_counts")
+        lo, hi = bootstrap_ci(cc)
+        entry = {"cer": s["cer"], "wer": s["wer"], "n_segments": s["n_segments"],
+                 "char_ref_len": s["char_ref_len"], "ci": [lo, hi]}
+
+        if baseline_rows is None:
+            entry["verdict"] = "SKIPPED (predictions_baseline_test.csv not found)"
+        else:
+            base_rows = baseline_by_source.get(source)
+            if base_rows is None:
+                entry["verdict"] = f"SKIPPED (baseline has no segments for source {source!r})"
+            else:
+                base_s = score([r["ref"] for r in base_rows], [r["hyp"] for r in base_rows])
+                base_cc = base_s.pop("_char_counts")
+                base_lo, base_hi = bootstrap_ci(base_cc)
+                entry["cer_baseline"] = base_s["cer"]
+                entry["ci_baseline"] = [base_lo, base_hi]
+                if min_improvement_pct is not None:
+                    entry["bound"] = (1 - min_improvement_pct / 100) * base_s["cer"]
+                    entry["pass"] = entry["cer"] <= entry["bound"]
+                if len(base_cc) == len(cc):
+                    d_lo, d_hi = bootstrap_delta_ci(base_cc, cc)
+                    entry["delta_ci"] = [d_lo, d_hi]
+                    entry["verdict"] = verdict(d_lo, d_hi)
+                else:
+                    entry["verdict"] = (
+                        f"SKIPPED (baseline has {len(base_cc)} segments, candidate has "
+                        f"{len(cc)} for source {source!r} -- not the same segments)"
+                    )
+        result[source] = entry
+    return result
+
+
 def _parent_segment_id(segment_id: str) -> str:
     """`seg_0000` or `seg_0000_3` (scripts/ingest_real_bench.py naming) -> `seg_0000`."""
     m = re.match(r"(seg_\d{4})(?:_\d+)?$", segment_id)
@@ -146,7 +227,8 @@ def _load_char_counts_from_predictions(csv_path: Path) -> list:
 
 
 def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseline: dict,
-             baseline_real_csv: str | Path | None = None) -> dict:
+             baseline_real_csv: str | Path | None = None,
+             baseline_test_csv: str | Path | None = None) -> dict:
     """cfg: src.config.Config. `baseline` is metrics/baseline.json's parsed dict
     (cer_test, cer_ood, cer_real -- all computed once at Stage 1, never
     recomputed here -- PROJECT_CORE.md §2.1 invariant 3). `results["_predictions"]`
@@ -154,7 +236,11 @@ def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseli
     treating `results` as pure tier/pass data (e.g. `overall_pass`).
     `baseline_real_csv`: path to baseline stage's `audit/predictions_baseline_real.csv`,
     used for the paired tier-4a comparison (module docstring) -- optional, skipped
-    with a note if not given or the segment count doesn't match."""
+    with a note if not given or the segment count doesn't match.
+    `baseline_test_csv`: path to baseline stage's `audit/predictions_baseline_test.csv`,
+    used for tier1_in_domain's `by_source` breakdown (module docstring) -- optional,
+    `by_source` entries note SKIPPED if not given or a slice's segment count doesn't
+    match."""
     results = {}
     predictions = {}
 
@@ -165,6 +251,21 @@ def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseli
         "cer": test_metrics["cer"], "bound": tier1_bound,
         "pass": test_metrics["cer"] <= tier1_bound,
     }
+
+    baseline_test_rows = None
+    if baseline_test_csv is not None and Path(baseline_test_csv).exists():
+        import csv as _csv_module
+        with open(baseline_test_csv, encoding="utf-8") as f:
+            baseline_test_rows = list(_csv_module.DictReader(f))
+    by_source = _score_by_source(
+        predictions["tier1_in_domain"], _meeting_to_source(test_ds.records), baseline_test_rows,
+        cfg.gates.min_improvement_pct
+    )
+    results["tier1_in_domain"]["by_source"] = by_source
+    results["tier1_in_domain"]["pass"] = (
+        results["tier1_in_domain"]["pass"]
+        and all(e.get("pass") is not False for e in by_source.values())
+    )
 
     if cfg.normalization.audit_conversions:
         tier1_alt_convention = ("as_written" if cfg.normalization.number_convention == "word_to_digit"

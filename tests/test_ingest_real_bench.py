@@ -7,7 +7,8 @@ import numpy as np
 import pytest
 
 from scripts.ingest_real_bench import (
-    MAX_SEGMENT_SEC, _split_text_proportionally, _choose_splits, resegment,
+    MAX_SEGMENT_SEC, MAX_CHARS_PER_SEC, _split_text_proportionally,
+    _choose_splits, resegment, _check_speech_rate, ingest_recording,
 )
 
 DONE_DIR = Path("D:/phowhisper-finetune-exp/dataset/done")
@@ -54,6 +55,29 @@ def test_resegment_real_audio_no_chunk_exceeds_limit_and_text_preserved():
         assert len(chunk_audio) / sr <= MAX_SEGMENT_SEC + 1e-6
     reconstructed = " ".join(t for _, t in chunks)
     assert reconstructed.split() == text.split()
+
+
+def test_check_speech_rate_raises_on_synthetic_over_rate_segment():
+    text = "a" * 200  # 200 chars over 1s -> 200 chars/sec, way past MAX_CHARS_PER_SEC
+    with pytest.raises(ValueError, match=r"200\.0 chars/sec"):
+        _check_speech_rate("meeting_x", "seg_0001", text, duration=1.0)
+
+
+def test_check_speech_rate_allows_normal_rate():
+    _check_speech_rate("meeting_x", "seg_0001", "một hai ba bốn năm", duration=2.0)
+
+
+def test_ingest_recording_raises_on_real_0002_seg_0074(tmp_path):
+    # real_0002/seg_0074: a proportional-split rejoin artifact measuring
+    # 475.7 chars/sec (1998 chars over a 4.2s chunk) vs. the corpus' next-worst
+    # 39.5 chars/sec -- must raise loud, not silently ingest.
+    with pytest.raises(ValueError, match=r"real_0002/seg_0074.*475\.7 chars/sec"):
+        ingest_recording(
+            DONE_DIR / "real_0002.draft.json",
+            DONE_DIR / "real_0002_16k.wav",
+            "real_0002",
+            tmp_path,
+        )
 
 
 def test_ingested_manifest_has_no_long_segments():

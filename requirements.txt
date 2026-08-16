@@ -15,6 +15,13 @@ transformers
 peft
 accelerate         # transitive via Trainer, pinned here so it is visible
 
+# Deliberately UNPINNED, and deliberately not hand-rolled: YouTube changes server-side
+# often enough that an old yt-dlp simply stops working, and extraction is not a ~50-line
+# job. scripts/probe_youtube_captions.py and scripts/fetch_youtube.py only. The latter
+# also needs `ffmpeg` on PATH (system dep, not pip)
+# to produce 16 kHz mono wav -- fetch_youtube.py raises naming it when absent.
+yt-dlp
+
 # Dev
 pytest
 matplotlib         # scripts/plot_training_curve.py only, not used by src/

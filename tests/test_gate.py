@@ -6,7 +6,8 @@ import csv
 from pathlib import Path
 
 from src.gate import (_score_by_meeting, _load_char_counts_from_predictions,
-                       rejoin_real_chunks, score_real)
+                       rejoin_real_chunks, score_real,
+                       _meeting_to_source, _score_by_source)
 
 
 def test_score_by_meeting_splits_by_meeting_id():
@@ -105,3 +106,93 @@ def test_score_real_boundary_shift_inflates_chunk_level_but_not_rejoined():
     )
     assert chunk_level_edits > 0  # raw chunk comparison sees mismatches
     assert score_real(predictions)["cer"] == 0.0  # rejoined sees the true (perfect) transcript
+
+
+# --------------------------------------------------- tier1_in_domain by_source
+
+def test_meeting_to_source_maps_from_records():
+    records = [{"meeting_id": "m1", "source": "synthetic"}, {"meeting_id": "m2", "source": "youtube"}]
+    assert _meeting_to_source(records) == {"m1": "synthetic", "m2": "youtube"}
+
+
+def test_score_by_source_splits_and_reports_ci_without_baseline():
+    predictions = [
+        {"segment_id": "s0", "meeting_id": "m1", "ref": "hello world", "hyp": "hello world"},
+        {"segment_id": "s1", "meeting_id": "m2", "ref": "chao ban", "hyp": "chao bat"},
+    ]
+    meeting_to_source = {"m1": "synthetic", "m2": "youtube"}
+    result = _score_by_source(predictions, meeting_to_source, baseline_rows=None)
+    assert set(result) == {"synthetic", "youtube"}
+    assert result["synthetic"]["cer"] == 0.0
+    assert result["synthetic"]["n_segments"] == 1
+    assert "ci" in result["synthetic"]
+    assert "cer_baseline" not in result["synthetic"]
+    assert result["synthetic"]["verdict"] == "SKIPPED (predictions_baseline_test.csv not found)"
+
+
+def test_score_by_source_computes_delta_ci_and_verdict_when_paired():
+    predictions = [
+        {"segment_id": "s0", "meeting_id": "m1", "ref": "aaaa", "hyp": "aaaa"},
+        {"segment_id": "s1", "meeting_id": "m2", "ref": "bbbb", "hyp": "bbbb"},
+    ]
+    baseline_rows = [
+        {"segment_id": "s0", "meeting_id": "m1", "ref": "aaaa", "hyp": "aaab"},
+        {"segment_id": "s1", "meeting_id": "m2", "ref": "bbbb", "hyp": "bbba"},
+    ]
+    meeting_to_source = {"m1": "synthetic", "m2": "youtube"}
+    result = _score_by_source(predictions, meeting_to_source, baseline_rows)
+    assert result["synthetic"]["cer"] == 0.0
+    assert result["synthetic"]["cer_baseline"] > 0
+    assert "delta_ci" in result["synthetic"]
+    assert result["synthetic"]["verdict"] in {"IMPROVED", "REGRESSED", "INCONCLUSIVE"}
+
+
+def test_score_by_source_skips_verdict_when_segment_counts_mismatch_but_keeps_cer_baseline():
+    predictions = [
+        {"segment_id": "s0", "meeting_id": "m1", "ref": "aaaa", "hyp": "aaaa"},
+        {"segment_id": "s1", "meeting_id": "m1", "ref": "bbbb", "hyp": "bbbb"},
+    ]
+    baseline_rows = [
+        {"segment_id": "s0", "meeting_id": "m1", "ref": "aaaa", "hyp": "aaab"},
+    ]
+    meeting_to_source = {"m1": "synthetic"}
+    result = _score_by_source(predictions, meeting_to_source, baseline_rows)
+    assert "SKIPPED" in result["synthetic"]["verdict"]
+    assert "cer_baseline" in result["synthetic"]
+    assert "delta_ci" not in result["synthetic"]
+
+
+def test_score_by_source_fails_a_regressing_slice_even_when_the_other_slice_improves():
+    # The case the pooled bound cannot catch: youtube (long refs, most of the
+    # pooled character denominator) improves a lot, synthetic regresses. Each
+    # slice is judged against its own baseline by tier 1's own rule.
+    predictions = [
+        {"segment_id": "s0", "meeting_id": "syn", "ref": "aaaa", "hyp": "aaab"},   # 25% CER
+        {"segment_id": "s0", "meeting_id": "yt", "ref": "b" * 100, "hyp": "b" * 100},
+    ]
+    baseline_rows = [
+        {"segment_id": "s0", "meeting_id": "syn", "ref": "aaaa", "hyp": "aaaa"},   # 0% CER
+        {"segment_id": "s0", "meeting_id": "yt", "ref": "b" * 100, "hyp": "c" * 100},
+    ]
+    meeting_to_source = {"syn": "synthetic", "yt": "youtube"}
+    result = _score_by_source(predictions, meeting_to_source, baseline_rows,
+                              min_improvement_pct=10.0)
+    assert result["youtube"]["pass"] is True
+    assert result["synthetic"]["pass"] is False
+
+
+def test_score_by_source_omits_pass_when_min_improvement_pct_not_given():
+    predictions = [{"segment_id": "s0", "meeting_id": "m1", "ref": "aaaa", "hyp": "aaaa"}]
+    baseline_rows = [{"segment_id": "s0", "meeting_id": "m1", "ref": "aaaa", "hyp": "aaab"}]
+    result = _score_by_source(predictions, {"m1": "synthetic"}, baseline_rows)
+    assert "pass" not in result["synthetic"]
+    assert "bound" not in result["synthetic"]
+
+
+def test_score_by_source_skips_source_missing_from_baseline_entirely():
+    predictions = [{"segment_id": "s0", "meeting_id": "m2", "ref": "aaaa", "hyp": "aaaa"}]
+    baseline_rows = [{"segment_id": "s0", "meeting_id": "m1", "ref": "aaaa", "hyp": "aaaa"}]
+    meeting_to_source = {"m1": "synthetic", "m2": "youtube"}
+    result = _score_by_source(predictions, meeting_to_source, baseline_rows)
+    assert "SKIPPED" in result["youtube"]["verdict"]
+    assert "cer_baseline" not in result["youtube"]

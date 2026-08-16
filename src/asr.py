@@ -64,7 +64,6 @@ def transcribe_batch(model, processor, audios: list[np.ndarray], language: str =
 
     device = next(model.parameters()).device
     dtype = next(model.parameters()).dtype
-    forced_ids = processor.get_decoder_prompt_ids(language=language, task="transcribe")
 
     hyps: list[str] = []
     starts = range(0, len(audios), batch_size)
@@ -73,6 +72,13 @@ def transcribe_batch(model, processor, audios: list[np.ndarray], language: str =
         inputs = processor(chunk, sampling_rate=16000, return_tensors="pt")
         features = inputs.input_features.to(device=device, dtype=dtype)
         with torch.no_grad():
-            ids = model.generate(input_features=features, forced_decoder_ids=forced_ids, num_beams=num_beams)
+            # language/task, not forced_decoder_ids: the latter is gone from both
+            # generate()'s signature and GenerationConfig as of transformers 5.x,
+            # and _validate_model_kwargs raises ValueError on kwargs the model
+            # doesn't consume -- so passing it fails loud on any 5.x runtime.
+            # language/task have been the supported path since 4.2x, so this
+            # works on the older Kaggle images too.
+            ids = model.generate(input_features=features, language=language,
+                                  task="transcribe", num_beams=num_beams)
         hyps.extend(processor.batch_decode(ids, skip_special_tokens=True))
     return hyps

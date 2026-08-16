@@ -73,6 +73,12 @@ class Training:
 class Sweep:
     lambdas: list[float] = field(default_factory=lambda: [0.0, 0.25, 0.5, 0.75, 1.0])
     ood_cer_budget: float = 0.02   # max absolute OOD CER regression vs baseline
+    # Elbow rule for cost/benefit lambda selection (SESSIONS.md E2): stop
+    # advancing through the grid once a step's (delta_ood_cer / delta_val_cer)
+    # exceeds this multiple of the previous step's ratio. 10.0 separates the
+    # ~8.9x step-to-step ratio jump seen at lambda=0.5 (accepted) from the
+    # ~12.6x jump at lambda=0.75 (rejected) on v3-r16's own sweep data.
+    elbow_ratio_threshold: float = 10.0
 
 
 @dataclass
@@ -158,6 +164,17 @@ def validate(cfg: Config) -> None:
         raise ValueError("lora.min_retained_energy must be in (0, 1]")
     if not cfg.sweep.lambdas:
         raise ValueError("sweep.lambdas is empty -- there is nothing to select from")
+
+    # Without an OOD set there is no forgetting measurement at all (tier 2 is the
+    # only one) and every sweep row's ood_cer is None, so select_lambda finds no
+    # budget-safe lambda and hard-fails -- but only AFTER training and five val
+    # decodes have already been paid for. Fail here instead.
+    if not cfg.data.ood_eval_path:
+        raise ValueError(
+            "data.ood_eval_path is unset -- tier 2 (OOD) is the only forgetting "
+            "measurement in the gate, and sweep-gate would hard-fail in "
+            "select_lambda after training. Run scripts/fetch_vivos.py first."
+        )
 
     # Tier-4 leak guard: the real benchmark must never be reachable as training data.
     ds = Path(cfg.data.dataset_path).resolve()

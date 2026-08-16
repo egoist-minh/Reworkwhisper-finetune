@@ -1,8 +1,8 @@
 # Active config. Edit this, never hardcode in src/.
 # Resolved copy is frozen to outputs/{run_id}/config.json -- that is what stages read.
 
-run_id: baseline-v0
-base_model: vinai/PhoWhisper-small    # small = runs locally on CPU. Swap to -large on GPU.
+run_id: v4-mixed-r16
+base_model: vinai/PhoWhisper-large    # -small only for local CPU smoke runs; the real run is -large
 seed: 42
 
 data:
@@ -12,8 +12,16 @@ data:
   # (renamed paid_meeting_legacy_0001-0006 -- user decision, since the new model
   # generation uses dot2's corrected test set instead, see below). Old paid-dataset/
   # kept on disk untouched as historical reference, no longer read by this config.
-  dataset_path: dataset/paid-dataset-v2
-  ood_eval_path: null                 # set once scripts/fetch_vivos.py has written it
+  #
+  # dataset_path itself now points past that: dataset/mixed-noisy-v1 merges this
+  # paid-dataset-v2 corpus with dataset/youtube-meetings (real, noisy YouTube audio)
+  # via scripts/build_mixed_dataset.py -- see youtube-data-pilot/README.md step 6.
+  dataset_path: dataset/mixed-noisy-v1
+  # Written by `python scripts/fetch_vivos.py --out dataset/vivos` (HuggingFace,
+  # AILAB-VNUHCM/vivos). Must exist before `--stage train`: tier 2 is the only
+  # measurement of forgetting in the gate, and select_lambda has no lambda to
+  # select without an ood_cer column -- src/config.py:validate refuses a null.
+  ood_eval_path: dataset/vivos
   # Ingested 2026-07-31 via scripts/ingest_real_bench.py from D:/phowhisper-finetune-exp/
   # dataset/done/ (264 segments after re-segmenting the 20 that exceeded 30s). Tier 4a
   # is in scope for this deadline -- not optional.
@@ -23,7 +31,10 @@ data:
   # segments from dot2's paid_meeting_test_0001-0003, using 10 voices with ZERO overlap
   # with the 10 fixed train voices -- unlike the old test set, this is a genuine
   # unseen-voice measurement. Verified 2026-08-02 (src/data.py resolve_splits).
-  val_meetings: [paid_meeting_0001, paid_meeting_0002, paid_meeting_0011]
+  # rCd8DSMk3-c added for mixed-noisy-v1: val must contain at least one YouTube
+  # meeting, or select_lambda() picks lambda* blind to the real-audio slice just
+  # added (youtube-data-pilot/README.md step 6).
+  val_meetings: [paid_meeting_0001, paid_meeting_0002, paid_meeting_0011, rCd8DSMk3-c]
 
 # Scoring normalization -- applied identically to hypothesis AND reference.
 # PROJECT_CORE.md §6 Stage 4. Never applied to training targets.
@@ -64,6 +75,7 @@ training:
 sweep:
   lambdas: [0.0, 0.25, 0.5, 0.75, 1.0]
   ood_cer_budget: 0.02                # hard budget; no lambda within it => fail, no fallback
+  elbow_ratio_threshold: 10.0         # cost/benefit stop rule (SESSIONS.md E2), see src/config.py
 
 # Eval gate thresholds -- only tiers 1, 2, 4a are in scope for the first run.
 # Tier 3 (RTF) dropped, tier 4b (long-form) deferred (deadline scope cut).
