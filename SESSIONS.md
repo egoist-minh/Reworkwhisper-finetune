@@ -697,8 +697,48 @@ check sẽ **raise**. Nhưng đó là so với một v3 **mạnh hơn** bản pu
 hơn** 0,0185 của v5@0,5. **Chưa đo, không được suy ra** — cần chấm v3-r16@λ=0,5 trên đúng 426
 segment synthetic đó trước khi chạy H4(a) thật, nếu không là đang so với sai model.
 
-**Chưa đo:** λ=0,75 và 1,0 (người dùng chỉ chạy 0,5). Không chặn quyết định — λ=0,5 đã thắng mọi
-ô, và OOD CER leo dốc phía trên nó (0,0262 → 0,0334 → 0,0426 so với bound 0,0428).
+**ĐƯỜNG CONG ĐẦY ĐỦ (2026-08-17, chạy tiếp λ=0,75 và 1,0). CER chạm đáy ở 0,75 rồi QUAY ĐẦU.**
+
+| λ | youtube CER | synthetic CER | real CER | youtube ret | synthetic ret | real ret | OOD CER |
+|---|---|---|---|---|---|---|---|
+| 0,25 (đã publish) | 0,0764 | 0,0258 | 0,2890 | 0,7094 | 0,7599 | 0,4545 | 0,0226 |
+| 0,5 (luật chọn) | 0,0624 | 0,0185 | 0,2453 | 0,8227 | 0,8309 | 0,5359 | 0,0262 |
+| **0,75 (chọn ship)** | **0,0593** | **0,0161** | **0,2440** | **0,8547** | 0,8622 | 0,5678 | 0,0334 |
+| 1,0 | 0,0610 | 0,0173 | 0,2504 | 0,8490 | **0,8706** | **0,5710** | 0,0426 |
+
+*(OOD CER lấy từ `lambda_sweep.csv`, bound 0,0428. `pass` và `retention_pass` đều `true` ở mọi λ đo.)*
+
+- **CER chạm đáy ở λ=0,75 trên cả ba slice rồi tệ đi ở λ=1,0** (0,0593→0,0610, 0,0161→0,0173,
+  0,2440→0,2504). Ba slice cùng quay đầu một lúc — overfit thật ở cường độ adapter tối đa, không
+  phải nhiễu một bộ.
+- **Lo ngại "λ cao kéo về nhãn 0 chữ hoa nên retention giảm" — SAI, đã bác bằng đo.** Retention
+  tăng đều tới 0,75, sau đó gần phẳng (youtube nhích xuống 0,8547→0,8490; synthetic/real vẫn nhích
+  lên). Cơ chế bị nghi không xuất hiện trong dải này. Ghi lại vì tôi đã nêu nó như rủi ro trước khi đo.
+- **λ=1,0 bị loại:** CER tệ hơn 0,75 ở cả ba slice, hơn retention không đáng kể (+0,84pp synthetic,
+  +0,32pp real, nhưng −0,57pp youtube), và OOD 0,0426 dư bound đúng 0,00027.
+
+**QUYẾT ĐỊNH (người dùng, 2026-08-17): ship λ=0,75.** Nó tốt hơn λ=0,5 ở **cả 6 ô** (CER
+−0,31/−0,24/−0,13pp, retention +3,20/+3,13/+3,19pp), giá là OOD CER 0,0262→0,0334 (+0,72pp tuyệt
+đối, +27% tương đối), vẫn trong bound với biên 0,0094. OOD là VIVOS — speech đọc, tiếng Việt phổ
+thông, tồn tại như chốt chặn catastrophic forgetting chứ không đại diện production; mọi slice
+**giống production** đều tốt hơn ở 0,75.
+
+**Đây là người override `select_lambda`, phải ghi rõ chứ không được trình bày như kết quả của luật.**
+Luật sau khi sửa vẫn chọn 0,5 (bước 0,75 có jump 11,68× > ngưỡng 10). Lý do luật hụt đã rõ: nó chỉ
+tối ưu val CER so với OOD CER, mà **val CER không nhìn thấy retention** — đúng cái tăng 3,2pp.
+Tiền lệ ngược chiều trong repo này: gate của v3-r16 chọn λ=1,0, người override xuống 0,5 sau khi
+grill `docs/finetune-results-report-v3.md`. **Chưa sửa `elbow_ratio_threshold`** — đổi ngưỡng để
+luật tự ra 0,75 là fit ngưỡng theo một kết quả đã biết, đúng thứ cổng dừng 3 cấm.
+
+**Đường ship, chưa chạy:** [scripts/gate_at_lambda.py](scripts/gate_at_lambda.py) — chạy gate đầy
+đủ ở λ chỉ định rồi bake adapter, tạo ra run dir `merge_and_push.py` nhận được nguyên trạng. Cố ý
+**không** làm cờ trên `stage_sweep_gate`: để một run bình thường không bao giờ lặng lẽ đi vòng
+`select_lambda`. Script raise nếu λ không phải row trong `lambda_sweep.csv`, và gate **đo lại**
+tier2 OOD ở λ đó thay vì chép số sweep, vì `check_provenance` đối chiếu hai con số — greedy decode
+trên cùng split OOD phải tái hiện đúng row sweep, lệch là một phát hiện chứ không phải chuyện làm
+tròn. Artifact upload đã đóng gói lại: `Outputs/lambda-sweep-artifacts.zip` giờ có thêm
+`metrics/baseline.json`, `metrics/lambda_sweep.csv`, `audit/predictions_baseline_real.csv` (gate
+cần cả ba). Tier 2 cần VIVOS — chạy `scripts/fetch_vivos.py` trên Kaggle trước.
 
 **Kết luận cho câu hỏi đã đặt ra:** trục "đồng âm ngắn thông dụng vs thuật ngữ dài hiếm" giải thích
 đúng 2/4 bộ (tier4a, `first10.wav`) nhưng **không** giải thích được H6 (phần lớn hồi quy không phải
