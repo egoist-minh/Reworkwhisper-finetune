@@ -542,3 +542,126 @@ tính nhầm là mất (`webinar`→`webina`). Không có nguyên nhân đơn nh
 không chạy D3 lúc này.** D3/D2 giữ `todo`, chờ tín hiệu rõ hơn (ví dụ: thêm 1 audio thật cùng
 domain interview/career có reference độc lập để xác nhận pattern `first10.wav` không phải ngẫu
 nhiên) thay vì đổ 6.5h GPU vào một giả thuyết đã bị chính dữ liệu của nó làm yếu đi.
+
+**Bộ đo thứ 4 (2026-08-17, `NZiW4QH83CI`, 20 segment, 29:00-35:49, chủ đề RPA/lập trình, ref tự
+sửa auto-caption) — nghiêng cán cân, retention giờ nhất quán hơn CER.** `scripts/eval_v3_v5_on_corrected_segments.py`
+trên Kaggle: CER v3=0.1854 vs v4mix=**0.1867** (gần như hoà, v5 tệ hơn không đáng kể trên 20
+segment), retention v3=**0.5769** (45/78) vs v4mix=**0.4487** (35/78) — v5 tệ hơn **12,8pp**, mẫu
+78 candidate không quá nhỏ.
+
+**Bảng 4 bộ đo:**
+
+| Bộ đo | Thuộc train v5? | CER | retention |
+|---|---|---|---|
+| H6 (youtube-meetings test) | có | v5 tốt hơn | v5 tệ hơn |
+| tier4a (`real-meetings-bench`, ML/VAE) | không | v5 tốt hơn | v5 tốt hơn |
+| `first10.wav` (webinar career) | không | v5 tệ hơn | v5 tệ hơn |
+| `NZiW4QH83CI` (RPA/lập trình) | không | hoà (v5 tệ hơn không đáng kể) | v5 tệ hơn |
+
+**retention tệ hơn ở 3/4 bộ — chỉ tier4a là ngoại lệ.** CER vẫn lộn xộn (2 tốt hơn, 1 tệ hơn, 1
+hoà), đúng như H3 đã cảnh báo từ đầu: CER không đủ nhạy để bắt lỗi mất từ mượn (một vài ký tự
+trên hàng trăm). **Giả thuyết mới, khớp cả 4 bộ, chưa kiểm thêm:** từ mượn mất ở H6/`first10.wav`/
+`NZiW4QH83CI` toàn từ ngắn, thông dụng, có đối thủ đồng âm tiếng Việt rõ (`team`→`tim`/`phim`,
+`build`→`bill`, `api`/`web`/`google`/`client`) — còn từ vựng tier4a toàn thuật ngữ dài, hiếm,
+không có đồng âm tiếng Việt cạnh tranh (`encoder`, `transformer`, `attention`, `layer`). Nếu đúng,
+train trên nhiều speech thật (dù hẹp) vừa giúp CER/retention từ hiếm nói chung (tier4a) vừa kéo
+prior về phía từ tiếng Việt thông dụng cho đúng nhóm từ ngắn hay bị nhầm — hai cơ chế khác nhau,
+không mâu thuẫn. **Chưa kiểm** (cần làm trước khi tin chắc): phân loại lại toàn bộ token mất ở cả
+4 bộ theo "có đối thủ đồng âm tiếng Việt hay không", xem có tách đúng 4 kết quả không.
+
+**Hệ quả:** retention đã tệ hơn ở đa số bộ đo độc lập (3/4), không còn là "1 file lẻ". Cơ sở cho
+D3/D2 mạnh hơn trước, nhưng vẫn nên kiểm giả thuyết "đồng âm ngắn vs thuật ngữ hiếm" ở trên trước
+khi đổ 6.5h GPU — nếu đúng, D3 (đổi tỉ lệ trộn) có thể không giải quyết được (vấn đề là loại từ,
+không phải tỉ lệ nguồn), còn hướng đúng hơn có thể là thêm ví dụ train chứa đúng nhóm từ ngắn hay
+mất (gần D2 hơn D3).
+
+**Đã kiểm giả thuyết "đồng âm ngắn vs thuật ngữ hiếm" (2026-08-17) — BỊ BÁC, không tách đúng cả 4
+bộ.** Dùng trực tiếp `english_token_retention` (đã có trong `src/metrics.py`, không viết bộ đếm
+mới) chạy trên đúng cặp `ref`/`hyp` của cả 4 bộ (join `(meeting_id, segment_id)`, xác nhận `ref`
+khớp byte-for-byte cho cả 4 — 228/264/20/1 khoá, 0 mismatch), rồi lấy phần chênh
+`missing[token]` giữa v4mix (v5) và v3-r16 (v4) — tức đúng những token mà v5 mất **nhiều hơn** v4,
+không phải toàn bộ token thiếu. Bốn số retention tính lại khớp tuyệt đối với bảng đã ghi phía trên
+(H6 0.7746→0.7094, tier4a 0.4083→0.4545, `NZiW4QH83CI` 0.5769→0.4487, `first10.wav` 0.7179→0.5128
+— số `first10.wav` chỉ khớp lại sau khi áp đúng `Normalizer()` mặc định của `configs/experiment.yaml`
+lên `ref_first10.txt`/`hyp4_first10.txt`/`hyp5_first10.txt`, vì 3 file đó là transcript thô chưa hạ
+thường/bỏ dấu câu — 3 CSV kia đã normalize sẵn trước khi ghi đĩa, theo đúng ghi chú ở H3).
+
+Đọc danh sách token hồi quy của từng bộ:
+- **tier4a** (bộ duy nhất v5 tốt hơn): toàn `task research attention size point text transformer
+  tokenize code mask vae llm sublayer embedding self` — đúng như dự đoán, thuật ngữ dài/hiếm,
+  không có đồng âm tiếng Việt. Giả thuyết đúng ở đây.
+- **`first10.wav`** (bộ v5 tệ nhất): toàn `team google build client webinar gmail nus` — đồng âm
+  ngắn thông dụng đúng như dự đoán. Giả thuyết đúng ở đây.
+- **H6** (retention tệ hơn nhưng CER tốt hơn): `team` (+14) là token đơn lẻ lớn nhất, nhưng **phần
+  còn lại** (`scope version meeting location staff outsource design service master interviewer
+  database terminal qps mock latency backend` — 76% phần chênh) không phải đồng âm ngắn, chỉ là
+  từ vựng miền chuyên biệt (họp/kỹ thuật) bị mất nhiều hơn nói chung. Giả thuyết chỉ đúng 1 phần.
+- **`NZiW4QH83CI`** (retention tệ hơn 12,8pp) — **phản ví dụ trực tiếp**: 4 token hồi quy toàn bộ
+  là `rpa rule chatbot ocr`, đúng loại "thuật ngữ hiếm, không đồng âm" mà giả thuyết dự đoán sẽ
+  **không** hồi quy (giống tier4a) — nhưng bộ này lại hồi quy mạnh nhất sau `first10.wav`.
+
+**Đọc trực tiếp transcript quanh 4 token đó** (`NZiW4QH83CI` segment 1,2,10-18,21,22, so `ref` với
+cả hai `hyp`) lộ ra cơ chế khác, không phải "đồng âm vs không đồng âm": `rpa` bị cả hai model nghe
+nhầm thành đánh vần chữ cái (`api`/`apa`), nhưng v5 đánh vần **rời rạc và biến thiên hơn** v3 —
+`apa` → `a pa` / `a a pa` / `ây ai` / `a ti a`; `ocr` cùng kiểu: v3 luôn ra `oca`, v5 dao động
+`oca` / `ô xê a` / `osia`; `rule` bị v5 cắt đuôi thành `ru` (near-miss chính tả, cùng loại lỗi (4)
+đã thấy ở `first10.wav`'s `webinar`→`webina`, không phải mất từ). Ở H6, nhìn segment `seg_0051`
+lộ thêm 1 dạng: v5 không chỉ đổi `team`→`tim`, mà còn viết `service`→`sờ vít`, `scope`→`sờ cốp`,
+`aws`→`android s` — đánh vần lại từ mượn tiếng Anh thành âm tiết tiếng Việt, gần giống nguyên tắc
+casing dòng 384 (`review_youtube.py:78`) áp cho phiên âm nói chung, không riêng "đồng âm có sẵn".
+
+**PHÁT HIỆN NẶNG NHẤT PHIÊN NÀY (2026-08-17) — v5 được publish ở λ=0,25 do LỖI DẤU trong
+`select_lambda`, không phải vì 0,25 tốt nhất. Sửa được không cần train lại.** Replay đúng
+[src/pipeline.py:32](src/pipeline.py#L32) trên `Outputs/v4-mixed-r16/metrics/lambda_sweep.csv`:
+
+```
+lam=0.0   val_cer=0.10337 ood_cer=0.02283  in_budget=True
+lam=0.25  val_cer=0.05483 ood_cer=0.02261  in_budget=True  ratio=-0.005   <-- ÂM
+lam=0.5   val_cer=0.03636 ood_cer=0.02619  in_budget=True  ratio=0.193  jump=-42x  <-- bị loại oan
+lam=0.75  val_cer=0.03316 ood_cer=0.03343  in_budget=True  ratio=2.260  jump=11.68x
+lam=1.0   val_cer=0.03257 ood_cer=0.04257  in_budget=True  ratio=15.360
+```
+
+Bước 0,0→0,25 làm OOD CER **giảm** (0,022833→0,022612) nên `delta_ood` âm, `prev_ratio = -0,005`.
+Điều kiện dừng `ratio > prev_ratio * elbow_ratio_threshold` thành `0,193 > -0,045` — **mọi ratio
+dương đều vượt một cái ngưỡng âm**, nên vòng lặp `break` ngay tại λ=0,5. Trên sweep của v3-r16 lỗi
+này không kích hoạt vì ratio ở λ=0,25 dương (+0,017) — đó là lý do nó sống sót qua row E2 và toàn
+bộ test cũ. λ=0,5 lẽ ra phải được chọn: val CER **0,0364** (so 0,0548), OOD 0,0262 vẫn trong bound
+0,0428, và λ=0,75 mới đúng là chỗ bị loại (jump 11,68× > ngưỡng 10). λ=0,5 cũng đúng bằng λ của v4
+— model production chạy tốt hơn.
+
+**Đã sửa:** một dòng trong `select_lambda` — chỉ bước có ratio **dương** mới được làm mốc so cho
+bước sau (bước "mua val CER mà không tốn OOD" không mang thông tin cost/benefit nên không định
+nghĩa được elbow). Test mới `test_select_lambda_a_free_step_does_not_reject_every_later_lambda`
+chạy đúng sweep row thật của v4-mixed-r16, đỏ trước khi sửa (`assert 0.25 == 0.5`), xanh sau. Full
+suite **170 pass**.
+
+**Bằng chứng phụ, đo 0 GPU — retention TĂNG theo độ mạnh adapter, base model là tệ nhất.** Tính
+`english_token_retention` trên `predictions_baseline_*.csv` đã có sẵn (cùng segment, `ref` khớp
+từng byte): base PhoWhisper (λ=0) **0,5574** synthetic / **0,3638** youtube / **0,3158** real, so
+với v4-mixed-r16 ở λ=0,25 đạt 0,7599 / 0,7094 / 0,4545. Fine-tune **cải thiện** retention chứ
+không phá — nên hạ λ để "an toàn" là đi sai chiều, và λ=0,5 **dự kiến** giữ từ mượn tốt hơn 0,25.
+Dự kiến, chưa đo — sweep chưa bao giờ ghi retention, chỉ ghi CER.
+
+**Row Lλ (mới, chạy trước D1/D2/D3):** [scripts/eval_v4_mixed_at_lambda.py](scripts/eval_v4_mixed_at_lambda.py)
++ [notebooks/eval-v4-mixed-at-lambda05.ipynb](notebooks/eval-v4-mixed-at-lambda05.ipynb) chấm lại
+`Outputs/v4-mixed-r16/checkpoints/best` (adapter thô, chưa bake λ — `adapter/` đã bake 0,25, không
+scale ngược lên được) ở λ=0,5 trên 654 segment test + real-meetings-bench, dùng lại chính
+`_score_by_source`/`score_real` của gate nên `pass`/`retention_pass` mang đúng nghĩa gate thật.
+**Inference thuần, không train, không push** — rẻ hơn D3 (~6,5h) rất nhiều và không cần dữ liệu mới.
+Đường scoring đã verify offline: chạy lại trên predictions đã lưu tái hiện `gate_results.json`
+đúng từng chữ số (0,0764/0,7094 · 0,0258/0,7599 · 0,2890/0,4545); chỉ đường decode là chưa test
+(không có GPU ở máy này). Artifact upload: `Outputs/lambda-sweep-artifacts.zip` (107 MB, đã đóng gói).
+**Cổng đọc kết quả:** CER giữ/tốt lên **và** retention tăng ở mọi slice → λ=0,5 là điểm vận hành tốt
+hơn cho cùng bộ weights, merge và push. Retention không tăng → λ không phải đòn bẩy, nói thẳng và
+dừng (lỗi `select_lambda` vẫn là lỗi thật, nhưng không mua được gì ở đây). **Không** đọc bằng CER
+một mình — đó đúng là lỗi đã cho v5 ra production.
+
+**Kết luận cho câu hỏi đã đặt ra:** trục "đồng âm ngắn thông dụng vs thuật ngữ dài hiếm" giải thích
+đúng 2/4 bộ (tier4a, `first10.wav`) nhưng **không** giải thích được H6 (phần lớn hồi quy không phải
+đồng âm) và **bị chính `NZiW4QH83CI` bác thẳng** (từ hiếm không đồng âm vẫn hồi quy mạnh, ngược
+tier4a). Trục thật có thể gần cơ chế phát âm/đánh vần hơn là "có/không đồng âm": v5 có xu hướng
+đánh vần lại từ mượn thành âm tiết tiếng Việt hoặc đánh vần chữ cái rời rạc hơn nói chung — cần dữ
+liệu mới (nghe lại audio, không chỉ đọc text) để xác nhận, chưa làm ở đây. **Không đủ cơ sở để chọn
+D2 qua D3 chỉ từ kết quả này** — trục đề xuất ban đầu không đứng vững, hệ quả kéo theo ("D2 nhắm
+đúng loại từ, D3 không") ở đoạn phía trên **không còn hiệu lực**.

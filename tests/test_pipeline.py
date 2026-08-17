@@ -17,6 +17,16 @@ V3_R16_SWEEP_ROWS = [
 V3_R16_BASELINE_OOD_CER = 0.022832927484899276  # baseline.json's cer_ood
 V3_R16_OOD_CER_BUDGET = 0.02
 
+# v4-mixed-r16's actual metrics/lambda_sweep.csv. Unlike v3-r16's, the first
+# step (0.0 -> 0.25) *improves* OOD CER, so its cost/benefit ratio is negative.
+V4_MIXED_R16_SWEEP_ROWS = [
+    {"lambda": 0.0, "val_cer": 0.10337330648114244, "ood_cer": 0.022832927484899276},
+    {"lambda": 0.25, "val_cer": 0.054833394361039914, "ood_cer": 0.022611555611776985},
+    {"lambda": 0.5, "val_cer": 0.036364884657634565, "ood_cer": 0.026185130135036844},
+    {"lambda": 0.75, "val_cer": 0.03316093006224826, "ood_cer": 0.033427152841466114},
+    {"lambda": 1.0, "val_cer": 0.03256590992310509, "ood_cer": 0.04256664874608646},
+]
+
 
 def test_select_lambda_picks_elbow_not_largest_budget_safe_lambda():
     # All five lambdas are within the 0.02 OOD budget (even 1.0 regresses only
@@ -49,6 +59,19 @@ def test_select_lambda_ignores_rows_with_no_ood_eval():
     ]
     best = select_lambda(rows, baseline_ood_cer=0.01, ood_cer_budget=0.02,
                           elbow_ratio_threshold=10.0)
+    assert best == 0.5
+
+
+def test_select_lambda_a_free_step_does_not_reject_every_later_lambda():
+    # v4-mixed-r16's real sweep. The 0.0 -> 0.25 step lowers OOD CER
+    # (0.022833 -> 0.022612), so its ratio is negative -- it bought val CER for
+    # free. A negative ratio must not become the elbow baseline: threshold * a
+    # negative number is a negative bar, which every positive ratio clears, so
+    # the walk used to stop dead at 0.25. 0.5 is the real elbow here -- val CER
+    # 0.0364 vs 0.0548 and OOD 0.0262 against a 0.0428 bound -- and the step to
+    # 0.75 is what the 10x rule should reject (11.7x the 0.5 step's ratio).
+    best = select_lambda(V4_MIXED_R16_SWEEP_ROWS, V3_R16_BASELINE_OOD_CER,
+                          V3_R16_OOD_CER_BUDGET, elbow_ratio_threshold=10.0)
     assert best == 0.5
 
 

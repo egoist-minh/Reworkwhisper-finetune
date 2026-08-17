@@ -46,6 +46,14 @@ def select_lambda(sweep_rows: list[dict], baseline_ood_cer: float,
     `elbow_ratio_threshold` times the previous step's own ratio -- that step
     and every larger lambda are rejected, and the last accepted lambda wins.
 
+    Only a step with a POSITIVE ratio becomes the baseline for the next step's
+    comparison. A step that bought val CER while OOD CER held or improved has a
+    ratio <= 0, and `threshold * (a non-positive number)` is a non-positive bar
+    that every real cost clears -- which stopped v4-mixed-r16's walk dead at
+    lambda=0.25, shipping a weaker adapter than its own sweep supported
+    (SESSIONS.md, the v5 production regression). A free step carries no
+    cost/benefit signal, so it defines no elbow.
+
     Raises if no lambda in the grid is budget-safe (mirrors the previous
     hard-fail contract).
     """
@@ -66,7 +74,8 @@ def select_lambda(sweep_rows: list[dict], baseline_ood_cer: float,
             ratio = delta_ood / delta_val if delta_val > 0 else math.inf
             if prev_ratio is not None and ratio > prev_ratio * elbow_ratio_threshold:
                 break  # elbow: marginal cost/benefit blew past the previous step
-            prev_ratio = ratio
+            if ratio > 0:
+                prev_ratio = ratio
 
         best = lam
         prev = (val_cer, ood_cer)
