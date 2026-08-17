@@ -27,6 +27,50 @@ _ZERO_FILLER = {"linh", "lẻ"}
 _MULTIPLIERS = set(_SCALES) | _ZERO_FILLER | {"mười", "mươi", "trăm"}
 _NUMWORDS = set(_DIGITS) | _MULTIPLIERS
 
+# Vietnamese tone diacritics (sắc, huyền, hỏi, ngã, nặng) as NFD combining
+# marks -- stripped before syllable-shape matching so tone doesn't matter,
+# while the six extra vowel LETTERS (ă â ê ô ơ ư, not accents) are kept.
+_TONE_MARKS = frozenset("̣́̀̉̃")
+
+# Vietnamese syllable grammar: optional onset + required nucleus + optional coda.
+# PROJECT_CORE.md §4's illustrative pattern only allows a single consonant
+# letter and a single vowel letter, which flags ~99% of real Vietnamese words
+# ("không", "được", "nhưng", ...) as non-Vietnamese -- unusable as literally
+# written. This extends it with digraph onsets and diphthong/triphthong nuclei.
+#
+# Lives here rather than in scripts/inspect_errors.py (where it was written)
+# because src/metrics.py needs it and inspect_errors imports from src.metrics --
+# keeping it there would be a circular import.
+_ONSETS = ["ngh", "ng", "nh", "ph", "th", "tr", "ch", "kh", "gi", "qu", "gh",
+           "b", "c", "d", "đ", "g", "h", "k", "l", "m", "n", "p", "q", "r",
+           "s", "t", "v", "x", "y"]
+_NUCLEI = ["oai", "oay", "uao", "uay", "uôi", "ươi", "ươu", "iêu", "yêu",
+           "uyu", "uya", "oeo", "uyê",
+           "ia", "ya", "iê", "yê", "ua", "uô", "ưa", "ươ", "oa", "oe", "uy",
+           "uơ", "uâ", "oă", "uê",
+           "ai", "ay", "ây", "ao", "au", "âu", "eo", "êu", "oi", "ôi", "ơi",
+           "ui", "ưi", "iu", "ưu",
+           "a", "ă", "â", "e", "ê", "i", "o", "ô", "ơ", "u", "ư", "y"]
+_CODAS = ["ng", "nh", "ch", "c", "m", "n", "p", "t"]
+
+
+def _alternation(options: list[str]) -> str:
+    return "|".join(sorted(options, key=len, reverse=True))
+
+
+_SYLLABLE = re.compile(
+    f"^(?:{_alternation(_ONSETS)})?(?:{_alternation(_NUCLEI)})(?:{_alternation(_CODAS)})?$"
+)
+
+
+def strip_tone(word: str) -> str:
+    decomposed = unicodedata.normalize("NFD", word)
+    return unicodedata.normalize("NFC", "".join(c for c in decomposed if c not in _TONE_MARKS))
+
+
+def is_vietnamese_shaped(token: str) -> bool:
+    return bool(_SYLLABLE.fullmatch(strip_tone(token.lower())))
+
 
 def _parse_run(tokens: list[str]) -> str:
     """Vietnamese number words -> digits.

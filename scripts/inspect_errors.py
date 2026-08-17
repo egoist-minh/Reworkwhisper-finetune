@@ -21,52 +21,17 @@ non-chunked predictions files.
 import argparse
 import csv
 import re
-import unicodedata
 from pathlib import Path
 
 from src.gate import rejoin_real_chunks
 from src.metrics import char_counts
 
-# Vietnamese tone diacritics (sắc, huyền, hỏi, ngã, nặng) as NFD combining
-# marks -- stripped before syllable-shape matching so tone doesn't matter,
-# while the six extra vowel LETTERS (ă â ê ô ơ ư, not accents) are kept.
-_TONE_MARKS = frozenset("̣́̀̉̃")
-
-
-def strip_tone(word: str) -> str:
-    decomposed = unicodedata.normalize("NFD", word)
-    return unicodedata.normalize("NFC", "".join(c for c in decomposed if c not in _TONE_MARKS))
-
-
-# Vietnamese syllable grammar: optional onset + required nucleus + optional coda.
-# PROJECT_CORE.md §4's illustrative pattern only allows a single consonant
-# letter and a single vowel letter, which flags ~99% of real Vietnamese words
-# ("không", "được", "nhưng", ...) as non-Vietnamese -- unusable as literally
-# written. This extends it with digraph onsets and diphthong/triphthong nuclei.
-_ONSETS = ["ngh", "ng", "nh", "ph", "th", "tr", "ch", "kh", "gi", "qu", "gh",
-           "b", "c", "d", "đ", "g", "h", "k", "l", "m", "n", "p", "q", "r",
-           "s", "t", "v", "x", "y"]
-_NUCLEI = ["oai", "oay", "uao", "uay", "uôi", "ươi", "ươu", "iêu", "yêu",
-           "uyu", "uya", "oeo", "uyê",
-           "ia", "ya", "iê", "yê", "ua", "uô", "ưa", "ươ", "oa", "oe", "uy",
-           "uơ", "uâ", "oă", "uê",
-           "ai", "ay", "ây", "ao", "au", "âu", "eo", "êu", "oi", "ôi", "ơi",
-           "ui", "ưi", "iu", "ưu",
-           "a", "ă", "â", "e", "ê", "i", "o", "ô", "ơ", "u", "ư", "y"]
-_CODAS = ["ng", "nh", "ch", "c", "m", "n", "p", "t"]
-
-
-def _alternation(options: list[str]) -> str:
-    return "|".join(sorted(options, key=len, reverse=True))
-
-
-_SYLLABLE = re.compile(
-    f"^(?:{_alternation(_ONSETS)})?(?:{_alternation(_NUCLEI)})(?:{_alternation(_CODAS)})?$"
-)
-
-
-def is_vietnamese_shaped(token: str) -> bool:
-    return bool(_SYLLABLE.fullmatch(strip_tone(token.lower())))
+# strip_tone / is_vietnamese_shaped and the syllable grammar behind them moved to
+# src/normalize.py so src/metrics.py can use them too -- importing them from here
+# would be circular, since this module imports src.metrics above. Re-exported
+# because plot_youtube_stats.py, probe_youtube_captions.py and
+# tests/test_inspect_errors.py already import them from this module.
+from src.normalize import is_vietnamese_shaped, strip_tone  # noqa: E402,F401
 
 
 def load_predictions(csv_path: str | Path) -> list[dict]:

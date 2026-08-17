@@ -1,8 +1,11 @@
-# Training curves + λ tradeoff — ba lần fine-tune
+# Training curves + λ tradeoff — bốn lần fine-tune
 
 Model gọi bằng **đúng tên trên HuggingFace**, không dùng nhãn "v1/v2/v3" — nhãn đó đá nhau với số
 của HF (`v1 → v3 → v4`), với run ID (`dot1-v1-lora` / `v1c-r16-valfix` / `v3-r16`) và với tên
 dataset (`paid-dataset-v2`).
+
+Lần 4 **chưa publish** nên gọi bằng run ID `v4-mixed-r16`. Đừng gọi tắt là "v4": tên
+`Reworkwhisper-large-v4` đã thuộc về lần 3.
 
 Trình bày theo **hai bước, đúng thứ tự này**:
 
@@ -19,13 +22,15 @@ giải thích. Đường OOD chính là lý do phải có bước 2, không ph�
 | 1 · 23/07 | `reworkwhisper-large-v1_training-curve.png` | — (không sweep λ) | `reworkwhisper-large-v1` |
 | 2 · 30/07 | `reworkwhisper-large-v3_training-curve.png` | `reworkwhisper-large-v3_lambda-tradeoff.png` | `reworkwhisper-large-v3-0.5lamda` |
 | 3 · 04/08 | `Reworkwhisper-large-v4_training-curve.png` | `Reworkwhisper-large-v4_lambda-tradeoff.png` | `Reworkwhisper-large-v4` |
+| 4 · 17/08 | `v4-mixed-r16_training-curve.png` | `v4-mixed-r16_lambda-tradeoff.png` + `v4-mixed-r16_lambda-by-lambda.png` | chưa publish |
 
-Ảnh của lần 1 và 2 copy từ `D:\phowhisper-finetune-exp\outputs\<run>\`. Ảnh của lần 3 sinh bằng
+Ảnh của lần 1 và 2 copy từ `D:\phowhisper-finetune-exp\outputs\<run>\`. Ảnh của lần 3 và 4 sinh bằng
 `scripts/plot_training_curve.py` và `scripts/plot_lambda_tradeoff.py`.
 
-**Cả 5 ảnh đã nhúng vào `docs/finetune-slides.html`** (deck 18 slide), mỗi ảnh kèm chú thích rút từ
-file này. Đường dẫn ảnh trong slide là tương đối (`training-curves/*.png`) nên phải giữ nguyên vị
-trí thư mục này cạnh file HTML.
+**5 ảnh của lần 1–3 đã nhúng vào `docs/finetune-slides.html`** (deck 18 slide), mỗi ảnh kèm chú
+thích rút từ file này. Đường dẫn ảnh trong slide là tương đối (`training-curves/*.png`) nên phải
+giữ nguyên vị trí thư mục này cạnh file HTML. **3 ảnh của lần 4 chưa vào deck** — hiện chỉ nhúng
+trong `docs/finetune-results-report-v4-mixed-r16.md`.
 
 Tên file ảnh gắn với **model xuất bản** của lần đó cho dễ tìm, nhưng nội dung mọi curve là **λ=1.0**
 — xem mục dưới.
@@ -73,8 +78,8 @@ toàn bộ train set với trọng số đã scale — ra một điểm, không 
   tách). Trục phải: train loss, linear, log mỗi 25 step.
 - λ=1.0, tức đúng model `reworkwhisper-large-v3`. Model xuất bản là
   `reworkwhisper-large-v3-0.5lamda` (λ=0.5) → **không có số nào trên ảnh trùng slide kết quả**.
-- `best val CER 1.4%` trên ảnh **không phải** `1.65` trên slide: khác tập (val 250 vs test
-  subset 216 câu không chữ số), khác λ. Gần nhau chỉ là trùng hợp.
+- `best val CER 1.4%` trên ảnh **không phải** `1.65` trên slide: khác tập (val 250 câu vs test
+  236 câu), khác λ (đồ thị 1.0, slide 0.5). Gần nhau chỉ là trùng hợp.
 - Dừng ở step 175/246 (epoch 2.11) do early stopping — cosine scheduler chưa anneal xong.
 - Run này **mất raw log**, chỉ còn PNG. Các số val CER theo step gõ tay trong
   `phowhisper-finetune-exp/docs/v1c-paid-lora-report.md` §5.3.
@@ -92,6 +97,19 @@ toàn bộ train set với trọng số đã scale — ra một điểm, không 
   không có cột WER.
 - Kiểm tra nhất quán: `lambda_sweep.csv` tại λ=1.0 cho val 1.023% / OOD 4.143%; curve kết ở
   1.010% / 4.197%. Lệch nhỏ vì gate decode lại, không phải sai số liệu.
+
+### Lần 4 — `v4-mixed-r16_training-curve.png`
+
+- Cùng bố cục và cùng script như lần 3, `--every 25` → 36 điểm train loss trên 885 step.
+- Đường đỏ: val CER 3.98% → 3.24% → 3.23% (val 365 segment = 250 giả lập + 115 YouTube).
+- Đường cam: OOD (VIVOS) CER 5.08% → 4.80% → 4.67%, **ở λ=1.0** — cảnh báo đầu file áp nguyên
+  vào lần này. Bản λ=0.25 xuất xưởng cho 2.26%, tức gần bằng base 2.28%.
+- **Đường tím (val loss) là điểm mới đáng nhìn**: 0.1303 → 0.1192 → **0.1246**, quay đầu ở
+  epoch 3 trong khi train loss vẫn xuống tới 0.0035. Overfit nhẹ. Không có early stopping —
+  `checkpoints/best/` trùng byte với `checkpoint-885/`.
+- Kiểm tra nhất quán: curve kết ở OOD 4.674% còn `lambda_sweep.csv` tại λ=1.0 cho 4.257%.
+  Lệch 0.42pp vì hai đường decode khác nhau (Trainer `predict_with_generate` vs `_eval_split`).
+  Đừng trộn hai cột.
 
 ---
 
@@ -129,6 +147,35 @@ quá 10× tỉ số bước trước (0.155) → chặn, **λ=0.5 thắng**.
 
 `--chosen` của script không tự tính lại luật này — `src.pipeline.select_lambda` là nơi duy nhất
 sở hữu nó.
+
+### Lần 4 — hai ảnh, `v4-mixed-r16_lambda-tradeoff.png` và `v4-mixed-r16_lambda-by-lambda.png`
+
+Cùng grid `[0, 0.25, 0.5, 0.75, 1.0]` và cùng ngân sách **+2.0pp** như lần 3 (base OOD 2.283%
+→ trần 4.283%). Hai khác biệt về hình:
+
+- `lambda_sweep.csv` của run này **có thêm hai cột** `val_cer_synthetic` / `val_cer_youtube`, nên
+  cả hai ảnh vẽ ba đường val thay vì một. Script tự phát hiện; sweep nào thiếu cột thì vẫn ra một
+  đường như cũ.
+- Ảnh thứ hai dùng `--style by-lambda` (λ trên trục x). Ảnh scatter không cho thấy trực tiếp "lát
+  nào kéo λ\*"; ảnh này thì có.
+
+| λ | val CER | OOD CER | Δval so bước trước | ΔOOD so bước trước | Giá / 1pp lợi |
+|---|---|---|---|---|---|
+| 0.0 (base) | 10.34% | 2.283% | — | — | — |
+| **0.25** | **5.48%** | **2.261%** | −4.85pp | **−0.02pp** | **−0.0046** |
+| 0.5 | 3.64% | 2.619% | −1.85pp | +0.36pp | 0.193 |
+| 0.75 | 3.32% | 3.343% | −0.32pp | +0.72pp | 2.26 |
+| 1.0 | 3.26% | 4.257% | −0.06pp | +0.91pp | 15.4 |
+
+**Cột cuối là chỗ luật elbow chạm trường hợp biên.** Bước đầu làm OOD CER *giảm*, nên giá/lợi
+**âm**; ngưỡng `prev_ratio × 10` vì thế cũng âm (−0.046) và bước 0.25→0.5 (0.193) vượt ngưỡng
+ngay. λ=0.5 bị loại không phải vì nó là khuỷu thật — khuỷu thật nằm ở 0.5→0.75, nơi tỉ số nhảy
+từ 0.193 lên 2.26. Cần chặn `prev_ratio` ở một mức dương tối thiểu; chi tiết trong
+`docs/finetune-results-report-v4-mixed-r16.md` §4.
+
+Ghi chú về màu: vạch ngân sách OOD đổi từ đỏ `#c9435b` sang tím `#8e44ad` (2026-08-17), vì run
+này thêm đường `val youtube` **cũng** màu đỏ đứt nét — trùng cả màu lẫn kiểu nét, đọc ra thành
+bốn đường sweep. Ảnh lần 2 và 3 sinh trước thay đổi này nên vạch ngân sách của chúng vẫn đỏ.
 
 ---
 

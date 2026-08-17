@@ -63,6 +63,17 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+## 5. Name Things By Their Real Names
+
+**Don't coin terms. Don't use IDs as nouns.**
+
+- **Use the name the tool, API, or codebase actually uses.** If you don't know it, look it up or describe the thing in plain words. Never invent a label and then reuse it as though it were established vocabulary. Real example of getting this wrong: "track upload" and `kind: asr` for YouTube captions — the first appears in no documentation anywhere, and the second is a YouTube Data API field while the code uses `yt-dlp`, whose actual field names are `automatic_captions` and `subtitles`. A coined name is also an unverifiable claim: the reader can't check it, so it reads as authority it hasn't earned.
+- **Row/tier/step IDs are pointers, not names.** `F2`, `tier4a`, `E5`, "bước 6" mean nothing to a reader who isn't holding the table open. On first use in a message, say what the thing does — "bước tải audio (F2)" — after which the bare ID is fine for the rest of that message.
+- **Separate identifiers that exist from ones you just made up.** `tier4a` is in `src/gate.py`; `real_0002/seg_0074` is in the corpus; a phrase invented this session is in neither. Presenting all three in the same tone makes the invented one look like a fact.
+- **Terse is not the same as compressed-by-labelling.** Swapping a description for a short coined label saves the writer tokens and costs the reader comprehension — a net loss, and the opposite of what a brevity instruction asks for. This holds under any style directive, including an active terse/caveman mode.
+
+The test: could the reader grep the term and find it — in this repo, in a dependency, or in that tool's own docs? If not, use the real term or spell out what it means.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
@@ -75,7 +86,7 @@ Full design spec, module contracts, config schema, and gate rules live in `PROJE
 
 ### State right now
 
-As of 2026-07-31, this repo has **only `PROJECT_CORE.md` and this file** — no `src/`, no `configs/`, no dataset yet. Nothing described below as "planned" exists on disk until it's built. Check before assuming a module, config, or dataset path is present.
+As of 2026-08-11, `src/`, `configs/`, `scripts/`, `tests/`, `dataset/` and one real run's artifacts (`Outputs/v3-r16/`) all exist. The pipeline has run end-to-end on Kaggle T4. Still check before assuming a specific module or config field is present — anything described below as "planned" or "todo" (see `SESSIONS.md`) does not exist on disk until it's built.
 
 ### Relationship to `D:\phowhisper-finetune-exp`
 
@@ -95,11 +106,21 @@ That's the predecessor repo — real git history, real training runs, real evide
 
 ### Dataset facts inherited from paid-dataset (verify before generalizing to the other 3 sets)
 
-- 10 ElevenLabs voices reused across every train/test meeting — `meeting_id` is disjoint but `voice_id` is not. Test CER measures "same voices, new content," not voice generalization.
+- This was true of `paid-dataset` (v1): 10 ElevenLabs voices reused across every train/test meeting — `meeting_id` disjoint but `voice_id` not, so test CER measured "same voices, new content," not voice generalization. **Verified fixed in `paid-dataset-v2`** (2026-08-04, run v3-r16's `validated_manifest.jsonl`: train has 10 voice_ids, test has 9, zero overlap) — v2's test CER does measure voice generalization. Don't assume either way for a new run; check `voice_id` overlap between splits in that run's manifest before citing this.
 - 100% synthetic (LLM-scripted + TTS). Absolute CER doesn't transfer to real speech — relative comparisons only.
 - ~62% of past in-domain CER improvement traced to digit normalization, not acoustic learning — don't attribute gains to the model without checking this first.
 - Code-switch detection: don't whitelist English words (72% false-positive rate observed). Use the Vietnamese syllable-shape regex test instead (see `PROJECT_CORE.md` §4).
 - `unpaid-dataset`, `dataset_by_task` haven't been profiled yet — don't assume these same warnings apply until someone checks. `done/` has been profiled (2026-07-31) and has its own set of caveats — reference transcript is post-edited PhoWhisper-small output, mixed number conventions, segments up to 212 s. See `PROJECT_CORE.md` §4 before using any tier-4 number.
+
+### Kaggle runner notebook (`notebooks/fine-tune-workflow.ipynb`)
+
+Downloaded back from Kaggle on 2026-08-11 — it is the **executed** notebook of the v3-r16 session (cells 1–16 have real execution counts and preserved outputs), not a template. It replaces `notebooks/run_pipeline.ipynb`, which was the unexecuted version of the same 28 cells. Treat it as the record of what actually ran, and as the source of truth for the Kaggle-side edits the local copy never had:
+
+- **Real mount paths are nested**: `/kaggle/input/datasets/<user>/<slug>/<slug>`, not `/kaggle/input/<slug>`. Cell 3 (`!ls -la /kaggle/input`) exists to confirm this before Cell 7 sets `DATASET_PATH` / `REAL_BENCH_PATH` — always re-run it, the shape has bitten this project once already.
+- **`TRANSFORMERS_AUTO_CONVERSION=0` is required**, set twice: as an env var in Cell 2 and inline on the `--stage baseline` command. Don't drop either when editing.
+- **Its `RUN_ID` cell still reads `"v0-r16"`**, so its output paths say `outputs/v0-r16/`. The same run's stored artifacts here are `Outputs/v3-r16/` (whose `config.json` says `run_id: v3-r16`). Same run, different label — never cite the notebook's directory names.
+- **Its `gate_results.json` output (Cell 24) is pre-rejoin-fix**: tier4a real CER 48.01% vs. baseline 45.76%, 146+118 segments. The authoritative rescored numbers are in `Outputs/v3-r16/metrics/gate_results.json` (35.07% vs. 31.57%, 115+81 segments, `_note` records the 2026-08-04 fix). Quote the stored file, not the notebook cell.
+- Run cost for scale: 3 epochs, 801 steps, **6 h 31 m** on a single T4 for PhoWhisper-large at `lora.rank=16`.
 
 ### Whisper/LoRA specifics
 

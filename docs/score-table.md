@@ -11,9 +11,11 @@ Hai tập: **VIVOS** (giọng thật đọc chuẩn, kiểm tra quên) · **tron
 Một model một cột, một bộ test một hàng. Ba nhóm cột = ba lần fine-tune, mỗi nhóm có cột base
 riêng vì mỗi lần dùng dataset riêng:
 
-- **Lần 1** · `dataset-dot1` · test n=500 *(tập này vừa là val vừa là test)*
-- **Lần 2** · `paid-dataset` · test n=236 · VIVOS n=760
-- **Lần 3** · `paid-dataset-v2` · test n=426 · VIVOS n=760
+- **Lần 1** · `dataset-dot1` · trong miền n=500 *(tập này vừa là val vừa là test)* · VIVOS n=760
+  theo `docs/archive/dot1-lora-report.md` §5.3 — đo bằng kernel Kaggle `winhkento/benchmark-asr`,
+  không lưu file raw nên không tự kiểm lại được
+- **Lần 2** · `paid-dataset` · trong miền n=236 · VIVOS n=760
+- **Lần 3** · `paid-dataset-v2` · trong miền n=426 · VIVOS n=760
 
 | Bộ test | paper<br>`vinai/PhoWhisper-large` | L1 base | L1 **`reworkwhisper-large-v1`** | L2 base | L2 `reworkwhisper-large-v3` | L2 **`reworkwhisper-large-v3-0.5lamda`** | L3 base | L3 adapter `v3-r16` *(chưa publish)* | L3 **`Reworkwhisper-large-v4`** |
 |---|---|---|---|---|---|---|---|---|---|
@@ -90,8 +92,11 @@ có mặt trên slide. Dùng tên HF thì hết ánh xạ để nhớ sai.
   Task-1) · 26.68 (VLSP 2020 Task-2).
 - **Thước định vị**: PhoWhisper-medium 1.85 CER, small 2.22 CER trên cùng VIVOS. Ở λ=1.0 bản large
   fine-tune (4.14–4.42) **tệ hơn cả small 244M chưa fine-tune**. Ở λ=0.5 thì không.
-- **`reworkwhisper-large-v3-0.5lamda`, bỏ phần học-viết-số** (216 câu ref không có chữ số): base
-  2.96 → **1.65**, tức −44.2%. Đây là phần "nghe tốt hơn thật", không phải −67.6%.
+- **`reworkwhisper-large-v3-0.5lamda`, bỏ phần học-viết-số**: trên 130 câu không chữ số
+  (`cer_nonum` của `v1c_lambda05_3way_benchmark_base_new_reports/benchmark_results.csv`), base
+  2.65 → **1.43**, tức −45.8%. Đây là phần "nghe tốt hơn thật", không phải −67.6%.
+  Đừng lẫn với con số của báo cáo cũ (`v1c-paid-lora-report.md` §6.3): bộ lọc ở đó ra **216 câu**,
+  base 2.96 → 1.30, và số 1.30 là **λ=1.0**, không phải λ=0.5. Hai bộ lọc khác nhau, không trộn.
 - **Tập họp thật** (audio họp thực, chỉ `Reworkwhisper-large-v4` có: 43.2 phút, 196 segment) không
   đưa vào bảng này. Số ở đó: base 31.57 → 29.06, nhưng verdict **INCONCLUSIVE** (CI của Δ là
   [−0.010, +0.076], chứa 0).

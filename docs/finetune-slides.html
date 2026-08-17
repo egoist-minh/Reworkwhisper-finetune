@@ -231,7 +231,13 @@ table.grid thead tr.mh code{font-size:.8em;}   /* keep HF names breaking at hyph
 table.grid thead tr.mh em{display:block; font-size:.9em;}
 table.grid tbody th{text-align:left; font-weight:600; background:var(--subtle-bg);}
 table.grid tbody th em{display:block; font-weight:400;}
-table.grid tbody tr.lam td,table.grid tbody tr.lam th{color:var(--muted); font-size:.92em;}
+table.grid tbody tr.lam td,table.grid tbody tr.lam th{
+  color:var(--muted); font-size:.92em;
+  padding-top:1px; padding-bottom:1px;   /* setup rows, not score rows -- keep them thin */
+}
+/* the n-per-set cells hold "760 / 426", wider than the 6.5% base columns -- td.num's
+   nowrap makes them overflow into the neighbouring cell, so let these wrap instead */
+table.grid tbody tr.lam td.num{white-space:normal;}
 table.grid tbody tr:nth-child(2n){background:none;}
 table.grid tbody tr:nth-child(2n) td{background:var(--subtle-bg);}
 
@@ -387,6 +393,10 @@ blockquote strong{color:var(--fg);}
   }
   .deck{height:auto; width:auto;}
 
+  /* the fade animation restarts when Chrome lays out the print document, so the
+     one .active slide gets snapshotted at opacity:0 -- page 1 came out blank */
+  .slide.active{animation:none !important; opacity:1 !important;}
+
   .slide{
     position:static;
     display:flex !important;
@@ -423,8 +433,8 @@ blockquote strong{color:var(--fg);}
     <div class="slide-inner">
       <div class="eyebrow">Dự án viet-speech · 2026-08 · ba lần fine-tune, ba dataset</div>
       <h1>Báo cáo quá trình<br>fine-tune PhoWhisper</h1>
-      <p class="lede">Lần đầu chứng minh fine-tune có hiệu quả — và làm lộ một rủi ro.
-      Lần hai sửa rủi ro đó. Lần ba lặp lại kết quả tốt trên dataset lớn hơn và đo chặt hơn.</p>
+      <p class="lede">Lần đầu chứng minh fine-tune có hiệu quả, đồng thời cho thấy một rủi ro.
+      Lần hai khắc phục rủi ro đó. Lần ba tái lập kết quả trên dataset lớn hơn, với quy trình đo lường nghiêm ngặt hơn.</p>
       <blockquote>
         <strong>CER</strong> = % ký tự sai so với transcript đúng — <strong>thấp hơn là tốt hơn</strong>.
         Ba lần dùng ba dataset khác nhau, nên không so CER trực tiếp giữa các lần;
@@ -435,14 +445,6 @@ blockquote strong{color:var(--fg);}
         <div class="mrow"><span class="mk">23/07</span><span class="mv">winhsss/reworkwhisper-large-v1 <span class="dim">· dataset-dot1</span></span></div>
         <div class="mrow"><span class="mk">30/07</span><span class="mv">winhsss/reworkwhisper-large-v3-0.5lamda <span class="dim">· paid-dataset</span></span></div>
         <div class="mrow"><span class="mk">04/08</span><span class="mv">winhsss/Reworkwhisper-large-v4 <span class="dim">· paid-dataset-v2 · mới nhất</span></span></div>
-      </div>
-
-      <div class="note" style="margin-top:clamp(12px,1.8vh,20px); margin-bottom:0;">
-        <span class="note-title">Về tên gọi</span>
-        Slide này gọi model bằng <strong>đúng tên trên HuggingFace</strong>, không dùng nhãn
-        "v1/v2/v3". Lý do: nhãn đó đá nhau với ba hệ số đếm khác — số của HF nhảy
-        <code>v1 → v3 → v4</code>, run ID là <code>dot1-v1-lora</code> / <code>v1c-r16-valfix</code> /
-        <code>v3-r16</code>, và dataset mới nhất lại tên <code>paid-dataset-v2</code>.
       </div>
     </div>
   </section>
@@ -476,15 +478,15 @@ blockquote strong{color:var(--fg);}
       </div>
 
       <div class="note">
-        <span class="note-title">Meeting rời nhau, nhưng 14 giọng dùng chung cả hai split</span>
+        <span class="note-title">Meeting tách biệt, nhưng 14 giọng được dùng chung cho cả hai split</span>
         Test đo được "nội dung họp mới", <strong>không</strong> đo được "giọng chưa từng nghe".
       </div>
 
       <div class="note">
-        <span class="note-title">Lỗi hệ thống của bộ này</span>
+        <span class="note-title">Lỗi hệ thống của bộ dữ liệu này</span>
         Audio tổng hợp từ <code>tts_input</code> đã Việt hoá sẵn ("server" → "sơ-vơ"),
-        còn nhãn giữ chính tả tiếng Anh — tức bộ dữ liệu <strong>dạy model nghe "sơ-vơ" viết "server"</strong>.
-        Đây là lý do CER của model gốc trên bộ này cao bất thường (29.65%).
+        còn nhãn giữ chính tả tiếng Anh — tức bộ dữ liệu <strong>dạy mô hình nghe "sơ-vơ" viết "server"</strong>.
+        Đây là lý do CER của mô hình gốc trên bộ này cao bất thường (29.65%).
       </div>
     </div>
   </section>
@@ -492,7 +494,7 @@ blockquote strong{color:var(--fg);}
   <!-- 3 · reworkwhisper-large-v1 results ............... -->
   <section class="slide">
     <div class="slide-inner">
-      <h2><code>reworkwhisper-large-v1</code> — học được, nhưng quên tiếng Việt</h2>
+      <h2><code>reworkwhisper-large-v1</code> — cải thiện trong miền, suy giảm tiếng Việt tổng quát</h2>
       <div class="meta">
         <span class="badge">2026-07-23</span>
         <span class="badge">LoRA r16 · q,k,v,out_proj</span>
@@ -500,8 +502,8 @@ blockquote strong{color:var(--fg);}
       </div>
 
       <div class="models">
-        <div class="mrow"><span class="mk">Model nền</span><span class="mv">vinai/PhoWhisper-large</span></div>
-        <div class="mrow"><span class="mk">Model sản phẩm</span><span class="mv">winhsss/reworkwhisper-large-v1</span></div>
+        <div class="mrow"><span class="mk">Mô hình nền</span><span class="mv">vinai/PhoWhisper-large</span></div>
+        <div class="mrow"><span class="mk">Mô hình sản phẩm</span><span class="mv">winhsss/reworkwhisper-large-v1</span></div>
         <div class="mrow"><span class="mk">Run</span><span class="mv">dot1-v1-lora <span class="dim">· dataset-dot1</span></span></div>
       </div>
 
@@ -512,19 +514,19 @@ blockquote strong{color:var(--fg);}
         </div>
         <div class="stat">
           <div class="stat-val"><span class="from">1.78</span><span class="arr">→</span>4.42</div>
-          <div class="stat-key">CER% VIVOS, giọng thật ngoài miền · ×2.48 tệ hơn</div>
+          <div class="stat-key">CER% VIVOS, giọng thật ngoài miền · suy giảm ×2.48</div>
         </div>
       </div>
 
-      <p class="body-text">Model học rất tốt nội dung họp: giữ đúng chính tả từ tiếng Anh mà bản gốc
-      hay phiên âm bậy. Nhưng vì <strong>áp dụng toàn bộ phần trọng số đã học, không giảm biên độ</strong>,
-      model <strong>quên khả năng nghe tiếng Việt tổng quát</strong>. Trên VIVOS (giọng đọc sách,
-      không liên quan gì tới dữ liệu train), số câu lỗi nặng tăng từ <strong>9 lên 18 câu</strong>.</p>
+      <p class="body-text">Mô hình học tốt nội dung họp: giữ đúng chính tả từ tiếng Anh mà mô hình gốc
+      thường phiên âm sai. Nhưng vì <strong>áp dụng toàn bộ phần trọng số đã học, không giảm biên độ</strong>,
+      mô hình <strong>suy giảm khả năng nhận dạng tiếng Việt tổng quát</strong>. Trên VIVOS (giọng đọc sách,
+      không liên quan tới dữ liệu train), số câu lỗi nặng tăng từ <strong>9 lên 18 câu</strong>.</p>
 
       <div class="verdict">
         <span class="v-label">Kết luận lần 1</span>
         <p>Bằng chứng thứ nhất: fine-tune <strong>có hiệu quả thật</strong> trên nội dung mục tiêu.
-        Đồng thời là nơi tìm ra bug cần sửa.</p>
+        Đồng thời, đây là lần phát hiện lỗi cần khắc phục.</p>
       </div>
     </div>
   </section>
@@ -546,10 +548,10 @@ blockquote strong{color:var(--fg);}
           <li>Đường đỏ/cam: CER và WER trên tập 500 câu. <span class="warn">Tập này vừa là val
           vừa là test</span> — <code>dataset-dot1</code> chỉ có một file
           <code>manifest.val.jsonl</code> dùng cho cả hai. Nên <strong>18.53% ở cuối đồ thị chính
-          là con số test ở slide trước</strong>, và cũng chính là chỗ hở mà lần 2 phải sửa.</li>
+          là con số test ở slide trước</strong>, và cũng là điểm yếu phương pháp mà lần 2 phải khắc phục.</li>
           <li>Trục phải: train loss, log mỗi 25 step → chỉ 5 điểm.</li>
           <li><strong>Base 29.65% không nằm trên đồ thị.</strong> Đường bắt đầu ở epoch 1 = 23.93%,
-          đã là sau khi train.</li>
+          tức đã sau khi huấn luyện.</li>
           <li>VIVOS 1.78% → 4.42% ở slide trước không có trên đồ thị — lần này không đo VIVOS trong
           lúc train. Hai số đó từ kernel Kaggle <code>winhkento/benchmark-asr</code>.</li>
         </ul></figcaption>
@@ -560,28 +562,28 @@ blockquote strong{color:var(--fg);}
   <!-- 5 · reworkwhisper-large-v1 win/loss .............. -->
   <section class="slide">
     <div class="slide-inner">
-      <h2><code>reworkwhisper-large-v1</code> — được gì, mất gì</h2>
+      <h2><code>reworkwhisper-large-v1</code> — phần cải thiện và phần suy giảm</h2>
       <div class="meta"><span class="badge">ví dụ thật, trích từ predictions</span></div>
 
       <div class="diff">
-        <div class="diff-head">được — giữ đúng thuật ngữ tiếng Anh (test in-domain)</div>
+        <div class="diff-head">Cải thiện — giữ đúng thuật ngữ tiếng Anh (test in-domain)</div>
         <div class="line"><span class="who">ref</span><span class="txt">một issue … upload file … thì fail</span></div>
         <div class="line bad"><span class="who">− base</span><span class="txt">áp lốt phai phai … thị phèo</span></div>
         <div class="line good"><span class="who">+ FT</span><span class="txt">đúng nguyên văn — CER 0%</span></div>
       </div>
 
       <div class="diff">
-        <div class="diff-head">mất — quên tiếng Việt nền (VIVOS, giọng thật đọc chuẩn)</div>
+        <div class="diff-head">Suy giảm — mất năng lực tiếng Việt nền (VIVOS, giọng thật đọc chuẩn)</div>
         <div class="line"><span class="who">ref</span><span class="txt">tiếng cọc cạch khựng lại của những khớp sắt</span></div>
         <div class="line good"><span class="who">base</span><span class="txt">tiếng cọc cạch khựng lại của những khớp sắt — đúng 100%</span></div>
-        <div class="line bad"><span class="who">− FT λ=1.0</span><span class="txt">tuyến tộc cạch khựng lại cổ những gốc sắt</span></div>
-        <div class="diff-foot">Câu này trích từ một run λ=1.0 về sau — lần 1 không lưu predictions
-        VIVOS từng câu, nhưng cùng mức λ=1.0 và cùng tập VIVOS.</div>
+        <div class="line bad"><span class="who">− FT λ=1.0</span><span class="txt">tiếng cọc cạch, thuận lợi của những gốm sắt</span></div>
+        <div class="diff-foot">Câu này (<code>VIVOSDEV01</code>) trích từ một run λ=1.0 về sau — lần 1
+        không lưu predictions VIVOS từng câu, nhưng cùng mức λ=1.0 và cùng tập VIVOS.</div>
       </div>
 
       <p class="body-text">Hai hiệu ứng này là hai mặt của cùng một nguyên nhân: biên độ thay đổi
-      trọng số quá lớn. Học được cái mới đi kèm drift khỏi năng lực gốc — chính câu mà model gốc
-      nghe đúng hoàn toàn thì bản fine-tune lại sai gần hết.</p>
+      trọng số quá lớn. Việc học nội dung mới đi kèm hiện tượng trôi khỏi năng lực gốc: chính câu mà mô hình
+      gốc nhận dạng đúng hoàn toàn thì bản fine-tune lại sai gần như toàn bộ.</p>
     </div>
   </section>
 
@@ -612,17 +614,17 @@ blockquote strong{color:var(--fg);}
       </div>
 
       <div class="note">
-        <span class="note-title">Sửa được lỗi nhãn của dot1</span>
-        Nhãn khớp đúng audio — không còn chuyện "dạy model nghe sơ-vơ viết server".
-        Vì thế CER của model gốc trên bộ này chỉ <strong>5.11%</strong> (dot1: 29.65%),
-        tức bài toán khó hơn nhiều để cải thiện tiếp.
+        <span class="note-title">Đã khắc phục lỗi nhãn của dot1</span>
+        Nhãn khớp đúng audio, không còn tình trạng "dạy mô hình nghe sơ-vơ viết server".
+        Vì thế CER của mô hình gốc trên bộ này chỉ <strong>5.11%</strong> (dot1: 29.65%),
+        tức biên độ cải thiện còn lại hẹp hơn nhiều.
       </div>
 
       <div class="note">
-        <span class="note-title">Còn hai hạn chế</span>
+        <span class="note-title">Hai hạn chế còn lại</span>
         (1) <strong>10 giọng ElevenLabs dùng chung cả 21 meeting</strong> — meeting rời nhau nhưng giọng
         trùng hoàn toàn, nên test vẫn chỉ đo "giọng đã nghe, nội dung mới".
-        (2) Bộ tự mâu thuẫn cách viết số: 8.9% dòng viết chữ số, 19.0% viết bằng chữ.
+        (2) Bộ dữ liệu không nhất quán về cách viết số: 8.9% dòng viết chữ số, 19.0% viết bằng chữ.
       </div>
     </div>
   </section>
@@ -630,7 +632,7 @@ blockquote strong{color:var(--fg);}
   <!-- 7 · reworkwhisper-large-v3-0.5lamda results ...... -->
   <section class="slide">
     <div class="slide-inner">
-      <h2><code>reworkwhisper-large-v3-0.5lamda</code> — giảm biên độ, hết quên</h2>
+      <h2><code>reworkwhisper-large-v3-0.5lamda</code> — giảm biên độ, không còn suy giảm</h2>
       <div class="meta">
         <span class="badge">2026-07-30</span>
         <span class="badge">LoRA r16 · thêm fc1, fc2</span>
@@ -638,31 +640,32 @@ blockquote strong{color:var(--fg);}
       </div>
 
       <div class="models">
-        <div class="mrow"><span class="mk">Model nền</span><span class="mv">vinai/PhoWhisper-large</span></div>
-        <div class="mrow"><span class="mk">Model sản phẩm</span><span class="mv">winhsss/reworkwhisper-large-v3-0.5lamda</span></div>
+        <div class="mrow"><span class="mk">Mô hình nền</span><span class="mv">vinai/PhoWhisper-large</span></div>
+        <div class="mrow"><span class="mk">Mô hình sản phẩm</span><span class="mv">winhsss/reworkwhisper-large-v3-0.5lamda</span></div>
         <div class="mrow"><span class="mk">Cách tạo</span><span class="mv">base + 0.5·Δ <span class="dim">· Δ = reworkwhisper-large-v3 − PhoWhisper-large</span></span></div>
       </div>
 
       <div class="stats">
         <div class="stat">
-          <div class="stat-val"><span class="from">2.96</span><span class="arr">→</span>1.65</div>
-          <div class="stat-key">CER% trong miền, đã tách phần học-viết-số · −44% là phần nghe thật</div>
+          <div class="stat-val"><span class="from">2.65</span><span class="arr">→</span>1.43</div>
+          <div class="stat-key">CER% trong miền, 130 câu không chữ số · −45.8% là phần cải thiện năng lực nhận dạng
+          <em>(toàn tập 236 câu: 5.11 → 1.65)</em></div>
         </div>
         <div class="stat">
           <div class="stat-val"><span class="from">2.16</span><span class="arr">→</span>2.21</div>
-          <div class="stat-key">CER% VIVOS · ×1.02, gần như nguyên (lần 1: ×2.48)</div>
+          <div class="stat-key">CER% VIVOS · ×1.02, gần như giữ nguyên (lần 1: ×2.48)</div>
         </div>
       </div>
 
-      <p class="body-text">Fine-tune sinh ra một lượng thay đổi trọng số <code>Δ</code> cộng vào model gốc.
-      <strong>λ là hệ số nhân biên độ của <code>Δ</code></strong>: model cuối = <code>base + λ·Δ</code>.
+      <p class="body-text">Fine-tune sinh ra một lượng thay đổi trọng số <code>Δ</code> cộng vào mô hình gốc.
+      <strong>λ là hệ số nhân biên độ của <code>Δ</code></strong>: mô hình cuối = <code>base + λ·Δ</code>.
       <code>λ=1.0</code> áp dụng toàn bộ <code>Δ</code> (như lần 1), <code>λ=0.5</code> áp dụng một nửa biên độ.
-      Đổi λ <strong>không cần train lại</strong> — chỉ scale lại phần đã có, mất 0 giây.</p>
+      Đổi λ <strong>không cần train lại</strong>: chỉ scale lại phần đã học, chi phí tính toán không đáng kể.</p>
 
       <div class="verdict">
         <span class="v-label">Kết luận lần 2</span>
-        <p>Bằng chứng thứ hai: bug ở lần 1 <strong>sửa được</strong> — và fine-tune vẫn giữ được
-        phần lớn lợi ích khi sửa đúng cách.</p>
+        <p>Bằng chứng thứ hai: lỗi ở lần 1 <strong>có thể khắc phục</strong>, và fine-tune vẫn giữ được
+        phần lớn lợi ích khi khắc phục đúng cách.</p>
       </div>
     </div>
   </section>
@@ -681,15 +684,15 @@ blockquote strong{color:var(--fg);}
         <img src="training-curves/reworkwhisper-large-v3_training-curve.png"
              alt="Training curve của reworkwhisper-large-v3: train loss và val CER/WER theo epoch">
         <figcaption class="fig-cap"><ul>
-          <li>Lần này đo trên <strong>val 250 câu tách rời test</strong> — đó là điểm sửa so với lần 1.
+          <li>Lần này đo trên <strong>val 250 câu tách rời test</strong>, là điểm được khắc phục so với lần 1.
           Nhãn đồ thị vì thế ghi "val", không phải "eval".</li>
           <li><span class="warn">1.43% trên đồ thị không phải 1.65% ở slide trước.</span> Khác tập
-          (val 250 câu vs test 216 câu không chữ số) và khác λ (đồ thị là 1.0, model xuất bản là
+          (val 250 câu vs test 236 câu) và khác λ (đồ thị là 1.0, mô hình xuất bản là
           0.5). Hai số gần nhau chỉ là trùng hợp.</li>
-          <li>Không overfit: val loss giảm đều 0.2394 → 0.0831, train loss cuối 0.0369, val CER đi
-          ngang chứ không quay đầu.</li>
+          <li>Không có dấu hiệu overfit: val loss giảm đều 0.2394 → 0.0831, train loss cuối 0.0369, val CER đi
+          ngang, không tăng trở lại.</li>
           <li>Early stopping dừng ở step 175/246 → cosine scheduler chưa anneal xong, LR bị cắt
-          giữa đà giảm. Chênh 1.43 ↔ 1.52 trên 250 câu chỉ là vài chục ký tự, tức nó bắn vào nhiễu.</li>
+          giữa đà giảm. Chênh lệch 1.43 ↔ 1.52 trên 250 câu chỉ tương đương vài chục ký tự, tức nằm trong khoảng nhiễu.</li>
         </ul></figcaption>
       </figure>
     </div>
@@ -701,32 +704,32 @@ blockquote strong{color:var(--fg);}
       <h2>λ và đánh đổi — phương pháp</h2>
       <div class="meta"><span class="badge">áp dụng cho cả lần 2 và lần 3</span></div>
 
-      <p class="body-text"><strong>Đánh đổi ở đây là gì:</strong> fine-tune càng mạnh thì CER trong
-      miền càng giảm, nhưng model càng trôi khỏi năng lực nghe tiếng Việt tổng quát. Hai chiều này
-      đi ngược nhau. Câu hỏi không phải "fine-tune hay không" mà là <strong>fine-tune mạnh tới
-      đâu</strong> — và λ là núm điều chỉnh chính xác độ mạnh đó.</p>
+      <p class="body-text"><strong>Bản chất của đánh đổi:</strong> fine-tune càng mạnh thì CER trong
+      miền càng giảm, nhưng mô hình càng trôi xa khỏi năng lực nhận dạng tiếng Việt tổng quát. Hai chiều này
+      ngược nhau. Câu hỏi không phải "fine-tune hay không" mà là <strong>fine-tune ở mức độ
+      nào</strong>, và λ là tham số điều chỉnh trực tiếp mức độ đó.</p>
 
       <div class="models">
-        <div class="mrow"><span class="mk">LoRA cộng thêm</span><span class="mv">Δ = (α / r) · B @ A <span class="dim">· không sửa trọng số gốc</span></span></div>
-        <div class="mrow"><span class="mk">Model cuối</span><span class="mv">base + λ · Δ <span class="dim">· λ=0 là base, λ=1 là adapter nguyên biên độ</span></span></div>
+        <div class="mrow"><span class="mk">LoRA cộng thêm</span><span class="mv">Δ = (α / √r) · B @ A <span class="dim">· không sửa trọng số gốc · cả hai lần đều <code>use_rslora=true</code> nên là √r, không phải r — scale 4.0 ở lần 2 (α16/r16), 8.0 ở lần 3 (α32/r16)</span></span></div>
+        <div class="mrow"><span class="mk">Mô hình cuối</span><span class="mv">base + λ · Δ <span class="dim">· λ=0 là base, λ=1 là adapter nguyên biên độ</span></span></div>
         <div class="mrow"><span class="mk">Cách scale</span><span class="mv">alpha ← λ · alpha <span class="dim">· B giữ bit-identical, không SVD, không sai số tái tạo</span></span></div>
       </div>
 
       <div class="cols2">
       <p class="body-text"><strong>Đo:</strong> với mỗi λ trong grid, decode <strong>hai tập cùng
       lúc</strong> — val trong miền để đo phần <em>được</em>, VIVOS ngoài miền để đo phần
-      <em>mất</em>. λ=0 chính là base nên nó tự làm điểm neo, không cần tin số base từ nguồn khác.</p>
+      <em>chi phí</em>. λ=0 chính là base nên tự đóng vai trò điểm neo, không phụ thuộc số base từ nguồn khác.</p>
 
       <p class="body-text"><strong>Chọn:</strong> hai tầng. (1) <em>Ngân sách cứng</em> — λ nào đẩy
-      CER ngoài miền quá ngân sách thì loại; nếu không λ nào lọt thì <strong>fail hẳn</strong>,
-      không chọn adapter, không push. (2) <em>Luật khuỷu cost/benefit</em> — đi từ λ nhỏ lên, bước
+      CER ngoài miền vượt ngân sách thì bị loại; nếu không λ nào thoả thì pipeline <strong>dừng với trạng thái FAIL</strong>:
+      không chọn adapter, không đẩy mô hình lên HuggingFace. (2) <em>Luật khuỷu cost/benefit</em> — đi từ λ nhỏ lên, bước
       nào có tỉ số ΔOOD/Δval vượt 10× tỉ số bước trước thì chặn tại đó.</p>
       </div>
 
       <div class="note">
-        <span class="note-title">Vì sao đáng làm</span>
-        Đổi λ <strong>không cần train lại</strong> — chỉ scale lại phần đã học, mất 0 giây. Một lần
-        train sinh ra cả một họ model để chọn.
+        <span class="note-title">Lý do phương pháp này khả thi</span>
+        Đổi λ <strong>không cần train lại</strong>: chỉ scale lại phần đã học, chi phí tính toán không đáng kể.
+        Một lần huấn luyện tạo ra cả một họ mô hình để lựa chọn.
       </div>
     </div>
   </section>
@@ -738,8 +741,8 @@ blockquote strong{color:var(--fg);}
       <div class="meta"><span class="badge">cùng một adapter, đo ở hai mức λ</span></div>
 
       <div class="models">
-        <div class="mrow"><span class="mk">λ = 1.0</span><span class="mv">winhsss/reworkwhisper-large-v3 <span class="dim">· lặp lại đúng lỗi quên của lần 1 — VIVOS ×2.57</span></span></div>
-        <div class="mrow"><span class="mk">λ = 0.5</span><span class="mv">winhsss/reworkwhisper-large-v3-0.5lamda <span class="dim">· model chọn dùng — VIVOS ×1.02</span></span></div>
+        <div class="mrow"><span class="mk">λ = 1.0</span><span class="mv">winhsss/reworkwhisper-large-v3 <span class="dim">· lặp lại hiện tượng suy giảm của lần 1 — VIVOS ×2.00</span></span></div>
+        <div class="mrow"><span class="mk">λ = 0.5</span><span class="mv">winhsss/reworkwhisper-large-v3-0.5lamda <span class="dim">· mô hình được chọn — VIVOS ×1.02</span></span></div>
       </div>
 
       <div class="table-wrap">
@@ -747,34 +750,34 @@ blockquote strong{color:var(--fg);}
         <thead>
           <tr>
             <th>Tăng λ từ</th>
-            <th class="num">Được thêm<br>CER trong miền giảm</th>
-            <th class="num">Trả giá<br>CER VIVOS tăng</th>
-            <th class="num">Giá mỗi 1pp lợi</th>
+            <th class="num">Cải thiện<br>CER trong miền giảm</th>
+            <th class="num">Chi phí<br>CER VIVOS tăng</th>
+            <th class="num">Chi phí mỗi 1pp cải thiện</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td>base → λ=0.5</td>
             <td class="num">−3.46pp <em>(−67.6% CER base)</em></td>
-            <td class="num">+0.05pp <em>(2% tổng giá)</em></td>
+            <td class="num">+0.05pp <em>(2% tổng chi phí)</em></td>
             <td class="num">0.013pp</td>
           </tr>
           <tr>
             <td>λ=0.5 → λ=1.0</td>
             <td class="num">−0.37pp <em>(−7.2% CER base)</em></td>
-            <td class="num">+2.12pp <em>(98% tổng giá)</em></td>
+            <td class="num">+2.12pp <em>(98% tổng chi phí)</em></td>
             <td class="num">5.74pp</td>
           </tr>
         </tbody>
       </table>
       </div>
 
-      <p class="body-text">Nửa dưới của thang λ (0 → 0.5) cho gần hết lợi ích và gần như không mất gì.
-      Nửa trên (0.5 → 1.0) cho rất ít lợi thêm nhưng gánh gần toàn bộ phần quên —
-      <strong>đắt hơn khoảng 440 lần</strong>. Lần 1 chạy ở λ=1.0 nên phải trả cả phần đắt đó.</p>
+      <p class="body-text">Nửa dưới của thang λ (0 → 0.5) mang lại gần như toàn bộ lợi ích với chi phí không đáng kể.
+      Nửa trên (0.5 → 1.0) mang lại rất ít lợi ích thêm nhưng chịu gần như toàn bộ mức suy giảm:
+      <strong>chi phí cao hơn khoảng 430 lần</strong>. Lần 1 chạy ở λ=1.0 nên phải chịu toàn bộ chi phí này.</p>
 
       <div class="diff">
-        <div class="diff-head">ví dụ — giữ đúng thuật ngữ và cách viết số (test in-domain)</div>
+        <div class="diff-head">Ví dụ — giữ đúng thuật ngữ và cách viết số (test in-domain)</div>
         <div class="line"><span class="who">ref</span><span class="txt">campaign … retention … 70%</span></div>
         <div class="line bad"><span class="who">− base</span><span class="txt">cam pên … rì ten sừn … bảy mươi phần trăm</span></div>
         <div class="line good"><span class="who">+ λ=0.5</span><span class="txt">đúng nguyên văn kể cả số — CER 0%</span></div>
@@ -798,13 +801,13 @@ blockquote strong{color:var(--fg);}
           <li>Mỗi điểm là một λ. Trục x = lỗi trong miền, trục y = lỗi ngoài miền,
           <strong>góc dưới-trái là lý tưởng</strong>. Hình chữ L chính là kết quả: quan hệ
           không tuyến tính.</li>
-          <li>λ=0.5 cho val 2.54% / VIVOS 2.21% — nằm ngay dưới trần. <strong>λ=0.6 đã vượt trần
-          (2.49%)</strong>, λ=1.0 bật lên 4.32% tức gấp đôi base. Ở lần này, ngân sách chặn thật.</li>
+          <li>λ=0.5 cho val 2.54% / VIVOS 2.21%, nằm ngay dưới trần. <strong>λ=0.6 đã vượt trần
+          (2.49%)</strong>, λ=1.0 tăng lên 4.32%, gấp đôi base. Ở lần này, ngân sách là ràng buộc quyết định.</li>
           <li><span class="warn">Trục x là CER val, bảng ở slide trước là CER test.</span>
           Val: 6.89 → 2.54 → 1.51. Test: 5.11 → 1.65 → 1.29. Không đọc các mức pp của bảng trực
           tiếp trên trục x đồ thị.</li>
           <li>Điểm vuông <code>attn-λ1.00</code> là một biến thể khác: chỉ scale attention, bỏ
-          <code>fc1</code>/<code>fc2</code>. Hướng này chưa khai thác tiếp.</li>
+          <code>fc1</code>/<code>fc2</code>. Hướng này chưa được khai thác thêm.</li>
         </ul></figcaption>
       </figure>
     </div>
@@ -837,7 +840,7 @@ blockquote strong{color:var(--fg);}
       </div>
 
       <div class="note">
-        <span class="note-title">Sửa được hạn chế lớn nhất của lần 2: giọng train và test rời nhau hoàn toàn</span>
+        <span class="note-title">Đã khắc phục hạn chế lớn nhất của lần 2: giọng train và test tách biệt hoàn toàn</span>
         Không một giọng nào của test xuất hiện trong train (0 giọng trùng, kiểm tra trực tiếp trên
         manifest của run). Đây là <strong>lần đầu con số test đo được khả năng tổng quát hoá sang giọng lạ</strong>,
         không chỉ "giọng đã nghe, nội dung mới".
@@ -845,8 +848,10 @@ blockquote strong{color:var(--fg);}
 
       <div class="note">
         <span class="note-title">Thêm một benchmark riêng bằng audio họp thật</span>
-        2 bản ghi họp thật, 43.2 phút, 264 segment — <strong>chỉ dùng để đo, không đưa vào train</strong>.
-        Đây là thước đo trung thực nhất cho use-case thật, và cũng là chỗ khó nhất (slide sau).
+        2 bản ghi họp thật, 43.2 phút, 264 chunk trong manifest — ghép lại còn <strong>196 segment
+        gốc</strong>; toàn bộ CER "họp thật" trong báo cáo này được chấm ở mức segment gốc.
+        <strong>Chỉ dùng để đo, không đưa vào train</strong>.
+        Đây là thước đo sát thực tế sử dụng nhất, đồng thời là phần khó nhất (trình bày ở slide sau).
       </div>
     </div>
   </section>
@@ -862,8 +867,8 @@ blockquote strong{color:var(--fg);}
       </div>
 
       <div class="models">
-        <div class="mrow"><span class="mk">Model nền</span><span class="mv">vinai/PhoWhisper-large</span></div>
-        <div class="mrow"><span class="mk">Model sản phẩm</span><span class="mv">winhsss/Reworkwhisper-large-v4 <span class="dim">· mô hình mới nhất</span></span></div>
+        <div class="mrow"><span class="mk">Mô hình nền</span><span class="mv">vinai/PhoWhisper-large</span></div>
+        <div class="mrow"><span class="mk">Mô hình sản phẩm</span><span class="mv">winhsss/Reworkwhisper-large-v4 <span class="dim">· mô hình mới nhất</span></span></div>
         <div class="mrow"><span class="mk">Run</span><span class="mv">v3-r16 <span class="dim">· paid-dataset-v2 · 3 epoch · lr 2e-4</span></span></div>
       </div>
 
@@ -888,10 +893,10 @@ blockquote strong{color:var(--fg);}
             <td>VIVOS — giọng thật đọc chuẩn, kiểm tra quên</td>
             <td class="num">2.28</td>
             <td class="num"><strong>2.49</strong></td>
-            <td class="res">✓ không quên</td>
+            <td class="res">✓ không suy giảm</td>
           </tr>
           <tr>
-            <td>Họp thật — 2 bản ghi, 43.2 phút</td>
+            <td>Họp thật — 2 bản ghi, 43.2 phút, 196 segment</td>
             <td class="num">31.57</td>
             <td class="num">29.06</td>
             <td class="res">~ chưa kết luận</td>
@@ -901,12 +906,12 @@ blockquote strong{color:var(--fg);}
       </div>
 
       <p class="body-text">Cùng công thức <code>λ=0.5</code> từ lần 2, áp dụng trên dataset lớn hơn và
-      đo chặt hơn: giảm hơn nửa CER trong miền <strong>trên giọng chưa từng nghe</strong>,
-      đồng thời không quên tiếng Việt nền. Không lặp lại lỗi của lần 1.</p>
+      đo lường nghiêm ngặt hơn: giảm hơn một nửa CER trong miền <strong>trên giọng chưa từng nghe</strong>,
+      đồng thời không suy giảm tiếng Việt nền. Không lặp lại lỗi của lần 1.</p>
 
       <div class="note">
-        <span class="note-title">Dòng "họp thật" — domain khó nhất, được train ít nhất</span>
-        29.06 thấp hơn base 31.57, nhưng chỉ 2 bản ghi nên chưa đủ mẫu để khẳng định chắc chắn.
+        <span class="note-title">Dòng "họp thật" — miền khó nhất và có ít dữ liệu huấn luyện nhất</span>
+        29.06 thấp hơn base 31.57, nhưng chỉ có 2 bản ghi nên chưa đủ mẫu để khẳng định.
         Nguyên nhân trực tiếp: dữ liệu train vẫn 100% giọng tổng hợp, chưa có audio họp thật nào.
       </div>
     </div>
@@ -927,15 +932,15 @@ blockquote strong{color:var(--fg);}
              alt="Lần 3 training curve: train loss, val CER và OOD CER theo epoch">
         <figcaption class="fig-cap"><ul>
           <li>Đỏ: val CER 1.19% → 1.05% → 1.01% (val 250 câu, đo mỗi epoch). Trục phải: train loss
-          <strong>log scale</strong> — loss chạy 31 → 0.06, để linear thì bước đầu nuốt hết phần
-          còn lại. Mean mỗi 25 step → 33 điểm.</li>
+          <strong>log scale</strong> — loss giảm từ 31 xuống 0.06; nếu dùng trục linear, bước đầu sẽ che
+          toàn bộ phần còn lại. Mean mỗi 25 step → 33 điểm.</li>
           <li><span class="warn">Cam là CER VIVOS, không phải WER</span> — khác nghĩa với đường cam
-          ở đồ thị hai lần trước. Nó kết ở 4.20% so với base 2.28%, tức <strong>đọc trần ra là quên
-          nặng</strong>.</li>
+          ở đồ thị hai lần trước. Đường này kết thúc ở 4.20% so với base 2.28%, tức <strong>phản ánh mức
+          suy giảm đáng kể</strong>.</li>
           <li><span class="warn">Đó là vì đồ thị này ở λ=1.0.</span> λ không tồn tại trong lúc train
-          — nó là phép scale hậu-train, nên mọi đường ở đây là adapter nguyên biên độ. Model xuất
+          — nó là phép scale hậu-train, nên mọi đường ở đây là adapter nguyên biên độ. Mô hình xuất
           bản ở λ=0.5 cho VIVOS 2.49%, đúng như bảng ở slide trước. <strong>Đường cam này chính là
-          lý do phải chọn λ</strong>, xem slide sau.</li>
+          lý do phải lựa chọn λ</strong>, xem slide sau.</li>
           <li>Không có val WER: log của run không ghi cột đó.</li>
         </ul></figcaption>
       </figure>
@@ -959,12 +964,12 @@ blockquote strong{color:var(--fg);}
       </figure>
 
       <div class="note">
-        <span class="note-title">Khác lần 2: ở lần này ngân sách KHÔNG phải thứ chặn λ</span>
+        <span class="note-title">Khác lần 2: ở lần này ngân sách không phải là ràng buộc quyết định λ</span>
         Cả 5 mức λ đều nằm trong ngân sách — λ=1.0 cho 4.14%, vẫn dưới trần 4.28%. Nên luật cũ
-        "lấy λ lớn nhất còn trong ngân sách" chọn λ=1.0, và lần chạy gốc <strong>đã chọn λ=1.0
-        thật</strong>. Thứ chặn ở đây là luật khuỷu: tỉ số ΔOOD/Δval ở bước 0.5→0.75 là 1.95, vượt
-        10× tỉ số bước trước (0.155) → chặn, λ=0.5 thắng. Cột cuối của bảng là toàn bộ luận điểm:
-        <strong>giá mỗi đơn vị lợi tăng gần 300 lần</strong> từ đầu grid tới cuối.
+        "lấy λ lớn nhất còn trong ngân sách" chọn λ=1.0, và lần chạy gốc <strong>thực tế đã chọn
+        λ=1.0</strong>. Ràng buộc quyết định ở đây là luật khuỷu: tỉ số ΔOOD/Δval ở bước 0.5→0.75 là 1.95,
+        vượt 10× tỉ số bước trước (0.155) nên dừng tại đó, λ=0.5 được chọn. Cột cuối của bảng thể hiện
+        toàn bộ luận điểm: <strong>chi phí mỗi đơn vị cải thiện tăng gần 300 lần</strong> từ đầu grid tới cuối.
       </div>
       </div>
 
@@ -972,7 +977,7 @@ blockquote strong{color:var(--fg);}
       <table class="dense">
         <thead>
           <tr><th class="num">λ</th><th class="num">CER val</th><th class="num">CER VIVOS</th>
-          <th class="num">Δ được</th><th class="num">Δ trả</th><th class="num">Giá mỗi 1pp lợi</th></tr>
+          <th class="num">Δ cải thiện</th><th class="num">Δ chi phí</th><th class="num">Chi phí mỗi 1pp cải thiện</th></tr>
         </thead>
         <tbody>
           <tr><td class="num">0 (base)</td><td class="num">5.83</td><td class="num">2.28</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>
@@ -1008,9 +1013,9 @@ blockquote strong{color:var(--fg);}
           <tr>
             <th rowspan="2">Bộ test</th>
             <th class="gsep">Paper</th>
-            <th class="gsep" colspan="2">Lần 1 · <code>dataset-dot1</code> · n=500</th>
-            <th class="gsep" colspan="3">Lần 2 · <code>paid-dataset</code> · n=236</th>
-            <th class="gsep" colspan="3">Lần 3 · <code>paid-dataset-v2</code> · n=426</th>
+            <th class="gsep" colspan="2">Lần 1 · <code>dataset-dot1</code></th>
+            <th class="gsep" colspan="3">Lần 2 · <code>paid-dataset</code></th>
+            <th class="gsep" colspan="3">Lần 3 · <code>paid-dataset-v2</code></th>
           </tr>
           <tr class="mh">
             <th class="gsep"><code>vinai/PhoWhisper-large</code></th>
@@ -1031,6 +1036,13 @@ blockquote strong{color:var(--fg);}
             <td class="num gsep">—</td><td class="num">1.0</td>
             <td class="num gsep">—</td><td class="num">1.0</td><td class="num">0.5</td>
             <td class="num gsep">—</td><td class="num">1.0</td><td class="num">0.5</td>
+          </tr>
+          <tr class="lam">
+            <th scope="row">n câu — VIVOS / trong miền</th>
+            <td class="num gsep">—</td>
+            <td class="num gsep">760 / 500</td><td class="num">760 / 500</td>
+            <td class="num gsep">760 / 236</td><td class="num">760 / 236</td><td class="num">760 / 236</td>
+            <td class="num gsep">760 / 426</td><td class="num">760 / 426</td><td class="num">760 / 426</td>
           </tr>
           <tr>
             <th scope="row">VIVOS · CER <em>ngoài miền</em></th>
@@ -1065,13 +1077,13 @@ blockquote strong{color:var(--fg);}
       </div>
 
       <div class="note cols2">
-        <span class="note-title">Ba chỗ dễ hiểu sai</span>
-        <p>(1) <strong>Paper không công bố CER, chỉ WER</strong> — muốn so với cột Paper thì phải đọc
+        <span class="note-title">Ba điểm dễ gây hiểu sai</span>
+        <p>(1) <strong>Paper không công bố CER, chỉ công bố WER</strong> — để so sánh với cột Paper, cần đọc
         hàng WER.</p>
         <p>(2) Hai hàng "trong miền" <strong>không so được ngang giữa ba lần</strong> vì ba dataset
-        khác nhau; mỗi lần có cột base riêng để so dọc trong cùng lần đó.</p>
-        <p>(3) Cùng một model base, ba lần đo VIVOS ra ba số (1.78 / 2.16 / 2.28) vì ba cách nạp
-        dữ liệu khác nhau — <strong>đừng trừ số tuyệt đối giữa các nhóm cột</strong>.</p>
+        khác nhau; mỗi lần có cột base riêng để so sánh dọc trong cùng lần đó.</p>
+        <p>(3) Cùng một mô hình base, ba lần đo VIVOS ra ba số (1.78 / 2.16 / 2.28) vì ba cách nạp
+        dữ liệu khác nhau — <strong>không nên lấy hiệu số tuyệt đối giữa các nhóm cột</strong>.</p>
       </div>
     </div>
   </section>
@@ -1079,13 +1091,13 @@ blockquote strong{color:var(--fg);}
   <!-- 17 · ratio table ................................. -->
   <section class="slide">
     <div class="slide-inner">
-      <h2>Tỉ lệ so với base — cách duy nhất so được giữa ba lần</h2>
+      <h2>Tỉ lệ so với base — cơ sở duy nhất để so sánh giữa ba lần</h2>
       <div class="meta"><span class="badge">mỗi lần chia cho base của chính nó</span></div>
 
       <div class="table-wrap">
       <table class="dense">
         <thead>
-          <tr><th>Model</th><th class="num">λ</th><th class="num">VIVOS</th><th class="num">Trong miền</th></tr>
+          <tr><th>Mô hình</th><th class="num">λ</th><th class="num">VIVOS</th><th class="num">Trong miền</th></tr>
         </thead>
         <tbody>
           <tr><td class="model"><code>reworkwhisper-large-v1</code></td><td class="num">1.0</td><td class="num">×2.48 ❌</td><td class="num">−37.5%</td></tr>
@@ -1097,28 +1109,30 @@ blockquote strong{color:var(--fg);}
       </table>
       </div>
 
-      <div class="cols2">
-      <p class="body-text"><strong>1 · Số của chúng tôi đúng.</strong> Paper nói VIVOS WER 4.67;
-      chúng tôi đo lại base ra 4.57 / 4.61 / 4.73 qua ba pipeline. Lệch tối đa 0.10pp — đây là căn
-      cứ để tin phần còn lại của bảng.</p>
-
-      <p class="body-text"><strong>2 · λ=1.0 luôn làm model quên.</strong> ×2.48 · ×2.00 · ×1.81.
-      Ba lần, hai dataset. Không phải tai nạn của một lần chạy.</p>
-
-      <p class="body-text"><strong>3 · λ=0.5 chữa được.</strong> ×1.02 và ×1.09 — gần như bằng base,
-      trong khi vẫn giữ hơn nửa phần lợi trong miền.</p>
-
-      <p class="body-text"><strong>4 · <code>Reworkwhisper-large-v4</code> chắc nhất.</strong> Giảm
-      hơn nửa CER trong miền, và là model duy nhất mà <strong>giọng test không có trong train</strong>
-      — hai model trước đo trên giọng đã nghe.</p>
+      <div class="note cols2">
+        <span class="note-title">Đây không phải bảng xếp hạng</span>
+        <p>Hai bản đầu làm ra để <strong>chứng minh fine-tune có hiệu quả</strong>, không nhằm đạt điểm
+        cao nhất. Mỗi mô hình lại đo trên tập test riêng, đề khó dễ khác nhau: <code>v4</code> bị đo trên
+        giọng <strong>chưa từng nghe khi học</strong>, hai mô hình trước đo trên giọng đã học.</p>
+        <p>Và −67.6% phần lớn là công học viết <code>70%</code> thay vì <em>bảy mươi phần trăm</em>: chỉ
+        tính câu không có chữ số thì <strong><code>v4</code> cải thiện nhiều hơn — −53.3% so với
+        −45.8%</strong>.</p>
       </div>
 
-      <div class="note cols2">
-        <span class="note-title">Để định vị mức suy giảm</span>
-        <p>Trên cùng VIVOS, <code>PhoWhisper-medium</code> đạt 1.85 CER và
-        <code>PhoWhisper-small</code> đạt 2.22 CER.</p>
-        <p>Nghĩa là ở λ=1.0, bản large fine-tune (4.14–4.42) <strong>tệ hơn cả bản small 244M chưa
-        fine-tune</strong>. Ở λ=0.5 thì không.</p>
+      <div class="cols2">
+      <p class="body-text"><strong>1 · Số đo của chúng tôi nhất quán với số công bố.</strong> Paper báo cáo VIVOS
+      WER 4.67; chúng tôi đo lại base được 4.57 / 4.61 / 4.73 qua ba pipeline. Sai lệch tối đa 0.10pp, là
+      căn cứ cho độ tin cậy của phần còn lại trong bảng.</p>
+
+      <p class="body-text"><strong>2 · λ=1.0 luôn gây suy giảm tiếng Việt tổng quát.</strong> ×2.48 · ×2.00 · ×1.81.
+      Ba lần, hai dataset — không phải hiện tượng ngẫu nhiên của một lần chạy.</p>
+
+      <p class="body-text"><strong>3 · λ=0.5 khắc phục được hiện tượng này.</strong> ×1.02 và ×1.09, gần như
+      bằng base, trong khi vẫn giữ hơn một nửa phần cải thiện trong miền.</p>
+
+      <p class="body-text"><strong>4 · <code>Reworkwhisper-large-v4</code> có cơ sở vững nhất.</strong> Giảm
+      hơn một nửa CER trong miền, và là mô hình duy nhất có <strong>giọng test không xuất hiện trong train</strong>;
+      hai mô hình trước đo trên giọng đã có mặt khi huấn luyện.</p>
       </div>
     </div>
   </section>
@@ -1130,27 +1144,27 @@ blockquote strong{color:var(--fg);}
       <div class="sumrows">
         <div class="sumrow">
           <div class="k">23/07</div>
-          <div class="v"><strong>Chứng minh học được</strong> — và lộ ra bug quên kiến thức nền.<br>
+          <div class="v"><strong>Chứng minh mô hình học được</strong> — đồng thời phát hiện lỗi suy giảm kiến thức nền.<br>
           <code>winhsss/reworkwhisper-large-v1</code>
-          <em>· dataset-dot1 · 1,347 segment train · giọng trùng split</em></div>
+          <em>· dataset-dot1 · 1,347 segment train · giọng trùng giữa các split</em></div>
         </div>
         <div class="sumrow">
           <div class="k">30/07</div>
-          <div class="v"><strong>Chứng minh sửa được</strong> — λ=0.5 giữ lợi ích, hết quên.<br>
+          <div class="v"><strong>Chứng minh khắc phục được</strong> — λ=0.5 giữ được lợi ích, không còn suy giảm.<br>
           <code>winhsss/reworkwhisper-large-v3-0.5lamda</code>
-          <em>· paid-dataset · 1,316 segment train · nhãn đã sửa, giọng vẫn trùng</em></div>
+          <em>· paid-dataset · 1,316 segment train · nhãn đã khắc phục, giọng vẫn trùng</em></div>
         </div>
         <div class="sumrow">
           <div class="k">04/08</div>
-          <div class="v"><strong>Thành quả hiện tại</strong> — lặp lại tốt trên dataset lớn hơn,
-          lần đầu đo được giọng lạ.<br>
+          <div class="v"><strong>Kết quả hiện tại</strong> — tái lập trên dataset lớn hơn,
+          lần đầu đo được năng lực trên giọng lạ.<br>
           <code>winhsss/Reworkwhisper-large-v4</code>
-          <em>· paid-dataset-v2 · 4,270 segment train · giọng rời nhau hoàn toàn</em></div>
+          <em>· paid-dataset-v2 · 4,270 segment train · giọng tách biệt hoàn toàn</em></div>
         </div>
       </div>
       <blockquote>
-        Việc còn lại: bổ sung audio họp thật vào tập train — đó là trục duy nhất chưa được chạm tới,
-        và là chỗ duy nhất kết quả còn chưa kết luận được.
+        Công việc còn lại: bổ sung audio họp thật vào tập train. Đây là hướng duy nhất chưa được triển khai,
+        và cũng là phần duy nhất kết quả chưa thể kết luận.
       </blockquote>
     </div>
   </section>

@@ -69,6 +69,63 @@ def score(refs: list[str], hyps: list[str]) -> dict:
     }
 
 
+def english_token_retention(refs: list[str], hyps: list[str]) -> dict:
+    """Share of the reference's non-Vietnamese-shaped tokens the hypothesis
+    reproduces verbatim, corpus-level (sum retained / sum candidates).
+
+    CER cannot substitute for this. Two reasons, both measured on the
+    v3-r16 -> v4-mixed-r16 regression this was written for:
+
+      * A loanword is a handful of characters in a segment of hundreds, so
+        losing every one of them moves CER by a fraction of a point -- inside
+        the bootstrap interval, indistinguishable from noise.
+      * Substituting a Vietnamese-shaped homophone (`team` -> `tim`,
+        `build` -> `bill`) costs 2 edit characters while destroying the token
+        for anything downstream that reads entities out of the transcript.
+
+    Candidate selection is the same filter scripts/plot_youtube_stats.py and
+    scripts/probe_youtube_captions.py already use -- `len > 1`, `isalpha()`,
+    and failing the Vietnamese syllable-shape test -- so the three numbers stay
+    comparable. `isalpha()` drops digits and alphanumerics; the syllable test
+    rather than an English whitelist because a whitelist measured a 72%
+    false-positive rate (CLAUDE.md).
+
+    Matching is multiset membership over the whole hypothesis segment, not
+    positional alignment: a token moved within the segment is still recognised,
+    but a token said twice and transcribed once counts as one retained. Both
+    sides must already be normalized the same way -- casing survives
+    normalization nowhere in this pipeline, so this measures SPELLING only
+    (`tim` for `team`), never casing.
+    """
+    if len(refs) != len(hyps):
+        raise ValueError(f"length mismatch: {len(refs)} refs vs {len(hyps)} hyps")
+
+    from collections import Counter
+
+    from src.normalize import is_vietnamese_shaped
+
+    n_candidates = n_retained = 0
+    missing: Counter = Counter()
+    for ref, hyp in zip(refs, hyps):
+        cands = Counter(t for t in ref.split()
+                        if len(t) > 1 and t.isalpha() and not is_vietnamese_shaped(t))
+        if not cands:
+            continue
+        present = Counter(hyp.split())
+        for token, want in cands.items():
+            got = min(want, present[token])
+            n_candidates += want
+            n_retained += got
+            if got < want:
+                missing[token] += want - got
+    return {
+        "retention": n_retained / n_candidates if n_candidates else None,
+        "n_candidates": n_candidates,
+        "n_retained": n_retained,
+        "missing": dict(missing.most_common()),
+    }
+
+
 def bootstrap_ci(counts: list[Counts], n_resamples: int = 1000, seed: int = 42,
                  alpha: float = 0.05) -> tuple[float, float]:
     """Segment-level bootstrap CI for one corpus rate."""

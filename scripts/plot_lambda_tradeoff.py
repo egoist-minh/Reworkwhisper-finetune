@@ -61,7 +61,9 @@ def plot_tradeoff(rows, baseline_ood, args):
         ax.plot([r["val_cer_youtube"] for r in rows], [r["ood_cer"] for r in rows],
                 "v--", color="#c9435b", markersize=6, label="λ sweep (val youtube)")
 
-    ax.axhline(baseline_ood + args.budget_pp, color="#c9435b", linestyle="--", linewidth=1.2,
+    # purple, not the #c9435b red of the youtube slice line -- same colour AND same
+    # dash style made the budget read as a fourth sweep curve on the mixed run
+    ax.axhline(baseline_ood + args.budget_pp, color="#8e44ad", linestyle="--", linewidth=1.2,
                label=f"ngân sách OOD (+{args.budget_pp:g}pp)")
     ax.axhline(baseline_ood, color="#7d8b99", linestyle=":", linewidth=1,
                label=f"OOD của base ({baseline_ood:.2f}%)")
@@ -99,7 +101,7 @@ def plot_by_lambda(rows, baseline_ood, args):
                 label="val CER% (youtube)")
     ax.plot(lambdas, [r["ood_cer"] for r in rows], "s-", color="#1f77b4", label="OOD CER%")
 
-    ax.axhline(baseline_ood + args.budget_pp, color="#c9435b", linestyle="--", linewidth=1.2,
+    ax.axhline(baseline_ood + args.budget_pp, color="#8e44ad", linestyle="--", linewidth=1.2,
                label=f"ngân sách OOD (+{args.budget_pp:g}pp)")
     if args.chosen is not None:
         ax.axvline(args.chosen, color="#1f2328", linestyle=":", linewidth=1.2,

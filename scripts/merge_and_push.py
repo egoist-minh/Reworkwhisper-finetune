@@ -82,6 +82,50 @@ def check_provenance(cfg: dict, gate: dict, sweep: list[dict], adapter: str) -> 
     return lam
 
 
+def check_no_regression_vs_production(candidate_csv: Path, production_csv: Path) -> tuple[float, float, int]:
+    """The check the gate never runs (SESSIONS.md H4): every tier compares a
+    candidate only against its own base-model baseline, never against whatever
+    is already serving production -- so two runs 51% apart on CER (v3-r16 vs
+    v4-mixed-r16, measured on 426 shared synthetic segments) can both
+    `overall_pass`. Joins `candidate_csv`/`production_csv` (both
+    `audit/predictions_tier1_in_domain.csv`) on (meeting_id, segment_id) and
+    raises if the candidate regresses on the segments both actually scored.
+
+    Raises if a shared key's `ref` differs between the two files (comparing
+    against the wrong segments, not the same test set) or if the candidate's
+    CER on the shared segments is worse than production's."""
+    import csv as csv_module
+
+    from src.metrics import score
+
+    def _load(path: Path) -> dict[tuple[str, str], dict]:
+        with open(path, encoding="utf-8") as f:
+            return {(r["meeting_id"], r["segment_id"]): r for r in csv_module.DictReader(f)}
+
+    candidate, production = _load(candidate_csv), _load(production_csv)
+    shared = candidate.keys() & production.keys()
+    if not shared:
+        raise RuntimeError(
+            f"{candidate_csv} and {production_csv} share no (meeting_id, segment_id) -- "
+            "cannot compare against production on segments neither run scored.")
+
+    for key in shared:
+        if candidate[key]["ref"] != production[key]["ref"]:
+            raise RuntimeError(
+                f"segment {key} has different `ref` text between {candidate_csv} and "
+                f"{production_csv} -- these are not the same test segments.")
+
+    cand_cer = score([candidate[k]["ref"] for k in shared], [candidate[k]["hyp"] for k in shared])["cer"]
+    prod_cer = score([production[k]["ref"] for k in shared], [production[k]["hyp"] for k in shared])["cer"]
+    print(f"production check: candidate cer={cand_cer:.4f} vs production cer={prod_cer:.4f} "
+          f"on {len(shared)} shared segments")
+    if cand_cer > prod_cer:
+        raise RuntimeError(
+            f"candidate regresses vs production on {len(shared)} shared segments: "
+            f"cer {cand_cer:.4f} > production's {prod_cer:.4f} -- refusing to push.")
+    return cand_cer, prod_cer, len(shared)
+
+
 def merge(base_model: str, adapter: str, tol: float):
     """fp32 CPU merge, verified against the unmerged PeftModel's logits."""
     import torch
@@ -185,6 +229,10 @@ def main() -> None:
     ap.add_argument("--out", required=True, help="local dir for the merged model")
     ap.add_argument("--public", action="store_true", help="push public (default: private)")
     ap.add_argument("--tol", type=float, default=1e-3, help="max logit diff allowed by the merge check")
+    ap.add_argument("--production-predictions",
+                    help="audit/predictions_tier1_in_domain.csv from the run currently serving "
+                    "production; if given, raise before merging if this candidate regresses "
+                    "against it on shared (meeting_id, segment_id) segments (SESSIONS.md H4)")
     ap.add_argument("--delete-remote-adapter", action="store_true",
                     help=f"after a successful upload, delete {' + '.join(ADAPTER_FILES)} from the repo")
     ap.add_argument("--confirm", action="store_true", help="required: without it, nothing is pushed")
@@ -201,6 +249,13 @@ def main() -> None:
     compat.apply()
 
     lam = check_provenance(cfg, gate, sweep, args.adapter)
+
+    if args.production_predictions:
+        candidate_csv = run_dir / "audit" / "predictions_tier1_in_domain.csv"
+        if not candidate_csv.exists():
+            raise RuntimeError(f"{candidate_csv} not found -- cannot compare against production")
+        check_no_regression_vs_production(candidate_csv, Path(args.production_predictions))
+
     merged, processor = merge(cfg["base_model"], args.adapter, args.tol)
 
     out.mkdir(parents=True, exist_ok=True)

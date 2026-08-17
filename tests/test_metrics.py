@@ -2,7 +2,50 @@
 earlier but never exercised by a test until now (2026-08-02, wired into
 gate.py's tier 4a paired comparison)."""
 
-from src.metrics import Counts, char_counts, score, bootstrap_ci, bootstrap_delta_ci, verdict
+import pytest
+
+from src.metrics import (Counts, char_counts, score, bootstrap_ci, bootstrap_delta_ci,
+                         english_token_retention, verdict)
+
+
+def test_english_token_retention_counts_only_non_vietnamese_shaped_tokens():
+    # "họp" and "về" are Vietnamese-shaped; "checklist" and "rollback" are not.
+    r = english_token_retention(["họp về checklist và rollback"],
+                                ["họp về checklist và rollback"])
+    assert r["n_candidates"] == 2
+    assert r["retention"] == 1.0
+
+
+def test_english_token_retention_catches_vietnamese_shaped_substitution():
+    # The regression this metric exists for: `team` -> `tim` costs 2 edit chars
+    # (CER barely moves) but the loanword is gone.
+    r = english_token_retention(["chốt với team về build"], ["chốt với tim về bill"])
+    assert r["retention"] == 0.0
+    assert r["missing"] == {"team": 1, "build": 1}
+
+
+def test_english_token_retention_is_multiset_not_set():
+    # Said twice, transcribed once -> one retained, not two.
+    r = english_token_retention(["gửi report và report lại"], ["gửi report và tim lại"])
+    assert (r["n_retained"], r["n_candidates"]) == (1, 2)
+    assert r["missing"] == {"report": 1}
+
+
+def test_english_token_retention_ignores_position():
+    r = english_token_retention(["team gửi report"], ["report gửi team"])
+    assert r["retention"] == 1.0
+
+
+def test_english_token_retention_skips_digits_and_alphanumerics():
+    # isalpha() drops these: digit normalization is measured by CER, not here.
+    r = english_token_retention(["chốt 200ms và 95"], ["chốt 200ms và 95"])
+    assert r["n_candidates"] == 0
+    assert r["retention"] is None
+
+
+def test_english_token_retention_rejects_length_mismatch():
+    with pytest.raises(ValueError, match="length mismatch"):
+        english_token_retention(["a"], ["a", "b"])
 
 
 def test_char_counts_identical_is_zero_edits():
