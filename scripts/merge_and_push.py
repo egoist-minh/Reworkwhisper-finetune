@@ -114,6 +114,22 @@ def merge(base_model: str, adapter: str, tol: float):
     return merged, processor
 
 
+def _check_saved(out: Path) -> None:
+    """Reload from the saved folder instead of asserting a list of filenames:
+    which files a processor writes is a transformers-version detail (5.x does not
+    write `preprocessor_config.json`), while "the folder loads standalone" is the
+    thing actually being verified. The model's own weights are not reloaded --
+    that would cost a second 6 GB -- but its two configs are."""
+    from transformers import GenerationConfig, WhisperConfig, WhisperProcessor
+
+    print("saved:", ", ".join(sorted(p.name for p in out.iterdir())))
+    WhisperConfig.from_pretrained(out)
+    GenerationConfig.from_pretrained(out)
+    processor = WhisperProcessor.from_pretrained(out)
+    if processor.tokenizer is None or processor.feature_extractor is None:
+        raise RuntimeError(f"{out} reloads a processor missing its tokenizer or feature extractor")
+
+
 def _git_commit() -> str:
     try:
         return subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True,
@@ -190,10 +206,7 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     merged.save_pretrained(out)
     processor.save_pretrained(out)
-    missing = [f for f in ("config.json", "generation_config.json", "preprocessor_config.json",
-                           "tokenizer_config.json") if not (out / f).exists()]
-    if missing:
-        raise RuntimeError(f"merged model saved without {missing} -- it will not load standalone")
+    _check_saved(out)
     (out / "README.md").write_text(model_card(args.repo_id, cfg, gate, lam), encoding="utf-8")
     print(f"merged model written to {out}")
 
