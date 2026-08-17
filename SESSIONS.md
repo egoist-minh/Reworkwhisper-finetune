@@ -740,6 +740,37 @@ tròn. Artifact upload đã đóng gói lại: `Outputs/lambda-sweep-artifacts.z
 `metrics/baseline.json`, `metrics/lambda_sweep.csv`, `audit/predictions_baseline_real.csv` (gate
 cần cả ba). Tier 2 cần VIVOS — chạy `scripts/fetch_vivos.py` trên Kaggle trước.
 
+**GATE λ=0,75 ĐÃ CHẠY, QUA HẾT (2026-08-18, `Outputs/lambda075-metrics/`).** `overall_pass: true`,
+`_lambda: 0.75`, `_lambda_source` ghi rõ đây là người override `select_lambda`.
+
+| tier | CER | bound | pass |
+|---|---|---|---|
+| tier1_in_domain | 0,0422 | 0,1018 | true |
+| — youtube | 0,0593 (ret 0,8547, base 0,3638) | — | pass + retention_pass |
+| — synthetic | 0,0161 (ret 0,8622, base 0,5574) | — | pass + retention_pass |
+| tier2_ood | 0,033427152841466114 | 0,0428 | true |
+| tier4a_real | 0,2440 | 0,3157 | true, verdict IMPROVED |
+
+**tier2 OOD khớp row sweep λ=0,75 với delta đúng 0,0** — `check_provenance` sẽ nhận adapter, và
+giả định "greedy decode cùng split OOD tái hiện đúng số sweep" được xác nhận chứ không phải chỉ
+hy vọng.
+
+**Production check qua sạch trên đủ 654 segment chung:** candidate **0,0422** so với production
+**0,0805**. retention trên cùng 654: **0,8574** so với 0,7945 (+6,3pp).
+
+**Mốc kiểm H6 tái hiện chính xác:** v3-r16@λ=0,5 trên 228 youtube ra CER **0,1205**, đúng số H6 đã
+đo phiên trước — hai run không lệch nhau ở đâu cả.
+
+**Nghi ngờ về tham chiếu λ=1,0 được xác nhận là đúng.** v3-r16@λ=0,5 trên 426 synthetic đạt
+**0,0196**, không phải 0,0171 của bản λ=1,0. Tham chiếu cũ khắt khe hơn model thật đang chạy đúng
+như dự đoán, và v5@0,75 (0,0161) **thắng cả slice synthetic** — slice duy nhất từng có nghi ngờ.
+Nếu vẫn dùng file λ=1,0 thì check đã đánh trượt một ứng viên đáng lẽ phải đậu.
+
+**Còn lại để publish:** chạy `scripts/merge_and_push.py` với `--run-dir` trỏ run dir λ=0,75,
+`--production-predictions` trỏ `v3-r16-lambda0.5/predictions_tier1_in_domain.csv`, cần `HF_TOKEN`.
+Predictions của v3-r16@λ=0,5 (654 dòng) nên giữ lại làm tham chiếu production cho mọi ứng viên sau,
+đừng tính lại mỗi lần.
+
 **Kết luận cho câu hỏi đã đặt ra:** trục "đồng âm ngắn thông dụng vs thuật ngữ dài hiếm" giải thích
 đúng 2/4 bộ (tier4a, `first10.wav`) nhưng **không** giải thích được H6 (phần lớn hồi quy không phải
 đồng âm) và **bị chính `NZiW4QH83CI` bác thẳng** (từ hiếm không đồng âm vẫn hồi quy mạnh, ngược
