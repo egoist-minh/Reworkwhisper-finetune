@@ -657,6 +657,49 @@ hơn cho cùng bộ weights, merge và push. Retention không tăng → λ khôn
 dừng (lỗi `select_lambda` vẫn là lỗi thật, nhưng không mua được gì ở đây). **Không** đọc bằng CER
 một mình — đó đúng là lỗi đã cho v5 ra production.
 
+**KẾT QUẢ ĐO λ=0,5 (2026-08-17, Kaggle, `Outputs/v4-mixed-r16-lambda0.5/`) — THẮNG SẠCH, không có
+đánh đổi.** Cùng bộ weights v5, chỉ đổi λ:
+
+| slice | CER@0,5 | CER@0,25 | retention@0,5 | retention@0,25 |
+|---|---|---|---|---|
+| tier1 youtube (228) | **0,0624** | 0,0764 | **0,8227** | 0,7094 |
+| tier1 synthetic (426) | **0,0185** | 0,0258 | **0,8309** | 0,7599 |
+| tier4a real (rejoin) | **0,2453** | 0,2890 | **0,5359** | 0,4545 |
+
+Cả 6 ô đều tốt hơn. `pass` và `retention_pass` đều `true` ở cả hai source. Cổng đọc đặt ra trước
+khi chạy ("cần CER giữ được **và** retention tăng") được thoả vượt mức — CER không chỉ giữ mà còn
+tốt lên 0,73–4,37pp, retention tăng 7,10–11,33pp.
+
+**Triệu chứng production gốc đã được sửa, đo trực tiếp trên token.** Trên 228 segment youtube,
+`team` mất **14 → 1**; `meeting` 6→0, `version` 6→0, `staff` 4→0, `master` 3→0, `qps` 3→0,
+`service` 3→0 (đúng token của hiện tượng `service`→`sờ vít`), `scope` 6→1, `interviewer` 5→1.
+Hồi quy ngược lại chỉ có 3 token lẻ: `sql` −2, `off` −1, `six` −1.
+
+**So với v4 đang chạy production, trên đúng slice cùng domain (H6, cả hai ở λ=0,5 nên so được):**
+v5@0,5 CER **0,0624** so với v4 **0,1205**, retention **0,8227** so với **0,7746**. Đây là chỗ
+v5@0,25 từng **thua** retention (0,7094 < 0,7746) — ở λ=0,5 v5 **thắng cả hai chỉ số**. Hồi quy
+retention trên domain production biến mất. tier4a cũng vậy: CER 0,2453 so với 0,3507, retention
+0,5359 so với 0,4083.
+
+**Đính chính một nhãn λ tôi ghi sai ở đoạn trên (phát hiện 2026-08-17).**
+`Outputs/v3-r16/audit/predictions_*.csv` được chấm ở **λ=1,0**, không phải λ=0,5 như tôi đã viết.
+Bằng chứng: `Outputs/v3-r16/adapter/adapter_config.json` có `lora_alpha=32.0` (rsLoRA, r=16 → scaling
+8,0 = λ=1,0), và `gate_results.json` của run đó có `tier2_ood.cer = 0.041428164827171814`, trùng
+**từng chữ số** với dòng λ=1,0 của `lambda_sweep.csv`. Run v3-r16 gate bằng luật cũ "λ lớn nhất
+trong ngân sách"; λ=0,5 là do người chọn lại sau khi grill `docs/finetune-results-report-v3.md` và
+publish riêng. Các số 0,0171 / 0,8643 / 0,4801 / 0,4083 vẫn đúng, chỉ nhãn λ sai.
+
+**Hệ quả còn mở cho H4(a):** `check_no_regression_vs_production` so ứng viên với
+`Outputs/v3-r16/audit/predictions_tier1_in_domain.csv` — file **λ=1,0**, không phải model đang chạy
+production (λ=0,5). Trên 426 synthetic chung, v5@0,5 đạt 0,0185 so với 0,0171 của v3@λ=1,0, tức
+check sẽ **raise**. Nhưng đó là so với một v3 **mạnh hơn** bản publish: sweep của v3-r16 ghi val CER
+0,01598 ở λ=0,5 so với 0,01023 ở λ=1,0, nên v3@λ=0,5 trên synthetic test gần như chắc chắn **tệ
+hơn** 0,0185 của v5@0,5. **Chưa đo, không được suy ra** — cần chấm v3-r16@λ=0,5 trên đúng 426
+segment synthetic đó trước khi chạy H4(a) thật, nếu không là đang so với sai model.
+
+**Chưa đo:** λ=0,75 và 1,0 (người dùng chỉ chạy 0,5). Không chặn quyết định — λ=0,5 đã thắng mọi
+ô, và OOD CER leo dốc phía trên nó (0,0262 → 0,0334 → 0,0426 so với bound 0,0428).
+
 **Kết luận cho câu hỏi đã đặt ra:** trục "đồng âm ngắn thông dụng vs thuật ngữ dài hiếm" giải thích
 đúng 2/4 bộ (tier4a, `first10.wav`) nhưng **không** giải thích được H6 (phần lớn hồi quy không phải
 đồng âm) và **bị chính `NZiW4QH83CI` bác thẳng** (từ hiếm không đồng âm vẫn hồi quy mạnh, ngược
