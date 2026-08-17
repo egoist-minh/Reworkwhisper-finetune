@@ -74,8 +74,18 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run-dir", default="Outputs/v4-mixed-r16",
-                    help="run dir: config.json, checkpoints/best, validated_manifest.jsonl, "
-                    "audit/predictions_baseline_*.csv")
+                    help="run dir supplying config.json and checkpoints/best (the weights), "
+                    "and by default the test split and baseline too")
+    ap.add_argument("--manifest", default=None,
+                    help="validated_manifest.jsonl to take the test split from, when it should "
+                    "not be --run-dir's own. Scoring one run's weights on another run's split is "
+                    "the point: v3-r16 trained on paid-dataset-v2 alone, so its split holds the "
+                    "426 synthetic segments and no youtube, and a candidate gated on the 654-segment "
+                    "mixed split has nothing to compare against on the half that is missing")
+    ap.add_argument("--baseline-test-csv", default=None,
+                    help="predictions_baseline_test.csv for --manifest's split (default: "
+                    "--run-dir's). Must cover the same segments, or by_source reports SKIPPED "
+                    "for the slices it does not")
     ap.add_argument("--audio-root", required=True,
                     help="mixed-noisy-v1's audio/ dir as mounted on this machine")
     ap.add_argument("--real-bench-path", default=None,
@@ -111,15 +121,16 @@ def main() -> None:
     out_root = Path(args.out_dir) if args.out_dir else run_dir
     out_root.mkdir(parents=True, exist_ok=True)
 
-    validated = [json.loads(l) for l in
-                 (run_dir / "validated_manifest.jsonl").read_text(encoding="utf-8").splitlines()]
+    manifest = Path(args.manifest) if args.manifest else run_dir / "validated_manifest.jsonl"
+    validated = [json.loads(l) for l in manifest.read_text(encoding="utf-8").splitlines()]
     test_records = [r for r in validated if r["split"] == "test"]
     if not test_records:
-        raise RuntimeError(f"no split=test records in {run_dir / 'validated_manifest.jsonl'}")
+        raise RuntimeError(f"no split=test records in {manifest}")
     test_ds = ManifestDataset(records=test_records, audio_root=Path(args.audio_root))
-    print(f"{len(test_records)} test segments selected from {run_dir / 'validated_manifest.jsonl'}")
+    print(f"{len(test_records)} test segments selected from {manifest}")
 
-    baseline_test_csv = run_dir / "audit" / "predictions_baseline_test.csv"
+    baseline_test_csv = (Path(args.baseline_test_csv) if args.baseline_test_csv
+                         else run_dir / "audit" / "predictions_baseline_test.csv")
     baseline_test_rows = None
     if baseline_test_csv.exists():
         with open(baseline_test_csv, encoding="utf-8") as f:
