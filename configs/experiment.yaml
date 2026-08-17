@@ -82,6 +82,8 @@ sweep:
 gates:
   min_improvement_pct: 10.0           # tier 1: CER_test <= 0.9 * CER_base
   real_cer_regression_pp: 0.0         # tier 4a: CER_real must not regress vs base
+  max_retention_regression_pp: 0.0    # tier1 by_source: english_token_retention must not
+                                       # drop vs baseline on the same source slice (H4b)
 
 hub:
   push: false

@@ -88,6 +88,9 @@ class Gates:
     (long-form) deferred (see handoff, deadline scope cut)."""
     min_improvement_pct: float = 10.0    # tier 1: CER_test <= (1 - pct/100) * CER_base
     real_cer_regression_pp: float = 0.0  # tier 4a: CER_real must not exceed CER_real(base) + this
+    max_retention_regression_pp: float = 0.0  # tier1 by_source: english_token_retention must
+                                               # not drop more than this (absolute) vs baseline
+                                               # on the same source slice (H4b, SESSIONS.md H6)
 
 
 @dataclass

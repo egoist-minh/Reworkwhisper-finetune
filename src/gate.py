@@ -77,7 +77,8 @@ import re
 from pathlib import Path
 
 from src.asr import transcribe_batch
-from src.metrics import score, char_counts, rate, bootstrap_ci, bootstrap_delta_ci, verdict
+from src.metrics import (score, char_counts, rate, bootstrap_ci, bootstrap_delta_ci, verdict,
+                          english_token_retention)
 from src.normalize import Normalizer
 
 
@@ -123,12 +124,24 @@ def _meeting_to_source(records: list[dict]) -> dict[str, str]:
 
 def _score_by_source(predictions: list[dict], meeting_to_source: dict[str, str],
                       baseline_rows: list[dict] | None,
-                      min_improvement_pct: float | None = None) -> dict:
+                      min_improvement_pct: float | None = None,
+                      max_retention_regression_pp: float | None = None) -> dict:
     """Per-`source` (synthetic/youtube) breakdown for tier1_in_domain -- see module
     docstring "by_source". `baseline_rows`: parsed `predictions_baseline_test.csv`
     rows (or None if that file doesn't exist). `min_improvement_pct`: when given
     and the slice's baseline is available, adds `bound`/`pass` applying tier 1's
-    own rule to that slice alone (module docstring, "Per-source pass/fail")."""
+    own rule to that slice alone (module docstring, "Per-source pass/fail").
+
+    `max_retention_regression_pp` (H4b, SESSIONS.md H6): CER cannot see a
+    loanword substitution (`team`->`tim`) -- a few edit characters in a
+    segment of hundreds -- so it passed a candidate (v4-mixed-r16) that
+    dropped 10.4pp of English-token retention on this same synthetic slice
+    (H3). Adds `retention`/`retention_baseline` from `english_token_retention`
+    and, when the slice's baseline is available and either side has
+    `n_candidates > 0`, `retention_pass` = candidate retention must not fall
+    more than this many absolute points below baseline's. `None` on either
+    side (slice has no English-shaped reference tokens) skips `retention_pass`
+    rather than failing it -- absence of loanwords is not a loanword loss."""
     by_source: dict[str, list[dict]] = {}
     for row in predictions:
         by_source.setdefault(meeting_to_source[row["meeting_id"]], []).append(row)
@@ -145,6 +158,8 @@ def _score_by_source(predictions: list[dict], meeting_to_source: dict[str, str],
         lo, hi = bootstrap_ci(cc)
         entry = {"cer": s["cer"], "wer": s["wer"], "n_segments": s["n_segments"],
                  "char_ref_len": s["char_ref_len"], "ci": [lo, hi]}
+        entry["retention"] = english_token_retention(
+            [r["ref"] for r in rows], [r["hyp"] for r in rows])["retention"]
 
         if baseline_rows is None:
             entry["verdict"] = "SKIPPED (predictions_baseline_test.csv not found)"
@@ -158,9 +173,17 @@ def _score_by_source(predictions: list[dict], meeting_to_source: dict[str, str],
                 base_lo, base_hi = bootstrap_ci(base_cc)
                 entry["cer_baseline"] = base_s["cer"]
                 entry["ci_baseline"] = [base_lo, base_hi]
+                entry["retention_baseline"] = english_token_retention(
+                    [r["ref"] for r in base_rows], [r["hyp"] for r in base_rows])["retention"]
                 if min_improvement_pct is not None:
                     entry["bound"] = (1 - min_improvement_pct / 100) * base_s["cer"]
                     entry["pass"] = entry["cer"] <= entry["bound"]
+                if (max_retention_regression_pp is not None
+                        and entry["retention"] is not None
+                        and entry["retention_baseline"] is not None):
+                    entry["retention_pass"] = (
+                        entry["retention"] >= entry["retention_baseline"] - max_retention_regression_pp
+                    )
                 if len(base_cc) == len(cc):
                     d_lo, d_hi = bootstrap_delta_ci(base_cc, cc)
                     entry["delta_ci"] = [d_lo, d_hi]
@@ -259,12 +282,13 @@ def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseli
             baseline_test_rows = list(_csv_module.DictReader(f))
     by_source = _score_by_source(
         predictions["tier1_in_domain"], _meeting_to_source(test_ds.records), baseline_test_rows,
-        cfg.gates.min_improvement_pct
+        cfg.gates.min_improvement_pct, cfg.gates.max_retention_regression_pp
     )
     results["tier1_in_domain"]["by_source"] = by_source
     results["tier1_in_domain"]["pass"] = (
         results["tier1_in_domain"]["pass"]
         and all(e.get("pass") is not False for e in by_source.values())
+        and all(e.get("retention_pass") is not False for e in by_source.values())
     )
 
     if cfg.normalization.audit_conversions:

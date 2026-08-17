@@ -136,7 +136,7 @@ def cut_segments(words: list[Word], duration: float) -> list[tuple[float, float,
 
 
 def ingest_meeting(meeting_id: str, draft_source: str, raw_root: Path, out_root: Path,
-                    is_test: bool = False) -> list[dict]:
+                    is_test: bool = False, window: tuple[float, float] | None = None) -> list[dict]:
     raw_dir = raw_root / meeting_id
     prov = json.loads((raw_dir / "provenance.json").read_text(encoding="utf-8"))
     words = drop_bracket_words(load_draft(raw_dir / "captions.json3", draft_source))
@@ -146,7 +146,7 @@ def ingest_meeting(meeting_id: str, draft_source: str, raw_root: Path, out_root:
         raise ValueError(f"{raw_dir / 'audio.wav'}: expected 16 kHz, got {sr}")
     full_duration = len(audio) / sr
 
-    window_start, window_end = middle_window(full_duration)
+    window_start, window_end = window if window is not None else middle_window(full_duration)
     words = window_words(words, window_start, window_end)
     audio = audio[int(window_start * sr):int(window_end * sr)]
     duration = window_end - window_start
@@ -206,9 +206,17 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=OUT_ROOT)
     ap.add_argument("--test-meetings", default=",".join(DEFAULT_TEST_MEETINGS),
                     help="comma-separated meeting_ids to write with split=test")
+    ap.add_argument("--window-override", action="append", default=[],
+                    dest="window_overrides", metavar="MEETING_ID:START_SEC:END_SEC",
+                    help="use this exact [start, end) window instead of middle_window() "
+                         "for one meeting; repeatable")
     args = ap.parse_args()
 
     test_meetings = {m for m in args.test_meetings.split(",") if m}
+    window_overrides = {}
+    for spec in args.window_overrides:
+        meeting_id, start_sec, end_sec = spec.split(":")
+        window_overrides[meeting_id] = (float(start_sec), float(end_sec))
 
     meeting_ids = sorted(p.name for p in args.raw_root.iterdir() if p.is_dir())
     if not meeting_ids:
@@ -216,7 +224,8 @@ def main() -> None:
 
     for meeting_id in meeting_ids:
         records = ingest_meeting(meeting_id, args.draft_source, args.raw_root, args.out,
-                                  is_test=meeting_id in test_meetings)
+                                  is_test=meeting_id in test_meetings,
+                                  window=window_overrides.get(meeting_id))
         n_long = sum(1 for r in records if r["duration"] > MAX_SEGMENT_SEC)
         if n_long:
             raise RuntimeError(f"{meeting_id}: {n_long} segments exceed {MAX_SEGMENT_SEC}s")

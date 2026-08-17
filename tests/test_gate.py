@@ -196,3 +196,55 @@ def test_score_by_source_skips_source_missing_from_baseline_entirely():
     result = _score_by_source(predictions, meeting_to_source, baseline_rows)
     assert "SKIPPED" in result["youtube"]["verdict"]
     assert "cer_baseline" not in result["youtube"]
+
+
+# --------------------------------------- tier1_in_domain retention (H4b, H6)
+
+def test_score_by_source_reports_retention_regardless_of_baseline():
+    # SESSIONS.md H6: CER alone missed the v4-mixed-r16 loanword-drop symptom
+    # -- retention has to show up even when there's no baseline to gate on.
+    predictions = [
+        {"segment_id": "s0", "meeting_id": "m1", "ref": "chao team hello build", "hyp": "chao tim hello bill"},
+    ]
+    result = _score_by_source(predictions, {"m1": "synthetic"}, baseline_rows=None)
+    assert result["synthetic"]["retention"] == 1 / 3  # only "hello" survives; "team"/"build" lost
+
+
+def test_score_by_source_retention_pass_fails_when_candidate_drops_more_than_budget():
+    # Candidate loses "team" (1 of 2 English tokens), baseline keeps both --
+    # a 50pp drop should fail a 5pp budget.
+    predictions = [{"segment_id": "s0", "meeting_id": "m1", "ref": "chao team build", "hyp": "chao tim build"}]
+    baseline_rows = [{"segment_id": "s0", "meeting_id": "m1", "ref": "chao team build", "hyp": "chao team build"}]
+    result = _score_by_source(predictions, {"m1": "synthetic"}, baseline_rows,
+                              max_retention_regression_pp=0.05)
+    assert result["synthetic"]["retention"] == 0.5
+    assert result["synthetic"]["retention_baseline"] == 1.0
+    assert result["synthetic"]["retention_pass"] is False
+
+
+def test_score_by_source_retention_pass_true_when_within_budget():
+    predictions = [{"segment_id": "s0", "meeting_id": "m1", "ref": "chao team build", "hyp": "chao team build"}]
+    baseline_rows = [{"segment_id": "s0", "meeting_id": "m1", "ref": "chao team build", "hyp": "chao team build"}]
+    result = _score_by_source(predictions, {"m1": "synthetic"}, baseline_rows,
+                              max_retention_regression_pp=0.05)
+    assert result["synthetic"]["retention_pass"] is True
+
+
+def test_score_by_source_omits_retention_pass_when_slice_has_no_english_tokens():
+    # No English-shaped reference tokens on either side -> retention is None
+    # on both sides -- absence of loanwords is not a loanword loss.
+    predictions = [{"segment_id": "s0", "meeting_id": "m1", "ref": "chao ban", "hyp": "chao ban"}]
+    baseline_rows = [{"segment_id": "s0", "meeting_id": "m1", "ref": "chao ban", "hyp": "chao bat"}]
+    result = _score_by_source(predictions, {"m1": "synthetic"}, baseline_rows,
+                              max_retention_regression_pp=0.05)
+    assert result["synthetic"]["retention"] is None
+    assert result["synthetic"]["retention_baseline"] is None
+    assert "retention_pass" not in result["synthetic"]
+
+
+def test_score_by_source_omits_retention_pass_when_threshold_not_given():
+    predictions = [{"segment_id": "s0", "meeting_id": "m1", "ref": "chao team", "hyp": "chao tim"}]
+    baseline_rows = [{"segment_id": "s0", "meeting_id": "m1", "ref": "chao team", "hyp": "chao team"}]
+    result = _score_by_source(predictions, {"m1": "synthetic"}, baseline_rows)
+    assert "retention" in result["synthetic"]
+    assert "retention_pass" not in result["synthetic"]
