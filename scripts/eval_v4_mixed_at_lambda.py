@@ -20,6 +20,21 @@ strength on every set measured so far (base lambda=0: 0.5574 synthetic /
 0.3158 real; v4-mixed-r16 at lambda=0.25: 0.7599 / 0.4545), so 0.5 is expected
 to retain more, but expected is not measured. This script measures it.
 
+`--lam` takes several values so one GPU session can trace retention against
+lambda instead of extrapolating it. Worth doing, because the "retention rises
+with adapter strength" reading rests on only two same-adapter points (lambda=0
+and lambda=0.25) -- it may saturate or reverse further up, since a higher
+lambda pulls harder toward training labels that carry 0 uppercase characters
+and sometimes spell loanwords as Vietnamese syllables, the very mechanism
+suspected behind `service` -> `sờ vít`.
+
+Measuring high lambdas is not the same as shipping one. On this sweep the step
+from 0.5 to 1.0 buys 0.38pp of val CER for 1.64pp of OOD CER, and OOD is VIVOS
+-- general Vietnamese, which production speaks far more of than it speaks
+loanwords, and which `english_token_retention` cannot see at all. lambda=1.0
+clears the OOD budget by 0.00027, thin enough that a re-measurement could put
+it over.
+
 Reads `checkpoints/best` -- the raw pre-lambda-bake adapter, the same source
 `stage_sweep_gate` scales for every lambda in a sweep -- NOT `adapter/`, which
 is already baked to the selected lambda and cannot be rescaled up.
@@ -37,7 +52,7 @@ first try" applies, expect at least one iteration). Inference only, no training.
     python -m scripts.eval_v4_mixed_at_lambda \\
         --audio-root /kaggle/input/datasets/<user>/mixed-noisy-v1/mixed-noisy-v1/audio \\
         --real-bench-path /kaggle/input/datasets/<user>/real-meetings-bench/real-meetings-bench \\
-        --lam 0.5
+        --lam 0.5 0.75 1.0
 """
 
 import argparse
@@ -65,9 +80,12 @@ def main() -> None:
                     help="mixed-noisy-v1's audio/ dir as mounted on this machine")
     ap.add_argument("--real-bench-path", default=None,
                     help="real-meetings-bench root as mounted here; tier 4a is skipped without it")
-    ap.add_argument("--lam", type=float, default=0.5)
+    ap.add_argument("--lam", type=float, nargs="+", default=[0.5],
+                    help="one or more lambdas, scored in one session -- the model loads once and "
+                    "`set_lambda` recomputes scaling from lora_alpha/r each time (absolute, not "
+                    "cumulative), so a sweep here costs only the extra decodes")
     ap.add_argument("--out-dir", default=None,
-                    help="where to write predictions/summary (default: <run-dir>/lambda<lam>)")
+                    help="parent dir for per-lambda subdirs (default: <run-dir>)")
     args = ap.parse_args()
 
     from src import compat
@@ -90,8 +108,8 @@ def main() -> None:
             f"{checkpoint_dir} missing -- the raw pre-lambda-bake adapter is required; "
             f"{run_dir / 'adapter'} is baked to the selected lambda and cannot be rescaled up")
 
-    out_dir = Path(args.out_dir) if args.out_dir else run_dir / f"lambda{args.lam}"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_root = Path(args.out_dir) if args.out_dir else run_dir
+    out_root.mkdir(parents=True, exist_ok=True)
 
     validated = [json.loads(l) for l in
                  (run_dir / "validated_manifest.jsonl").read_text(encoding="utf-8").splitlines()]
@@ -101,9 +119,23 @@ def main() -> None:
     test_ds = ManifestDataset(records=test_records, audio_root=Path(args.audio_root))
     print(f"{len(test_records)} test segments selected from {run_dir / 'validated_manifest.jsonl'}")
 
+    baseline_test_csv = run_dir / "audit" / "predictions_baseline_test.csv"
+    baseline_test_rows = None
+    if baseline_test_csv.exists():
+        with open(baseline_test_csv, encoding="utf-8") as f:
+            baseline_test_rows = list(csv.DictReader(f))
+    else:
+        print(f"WARNING: {baseline_test_csv} missing -- no baseline, no pass/retention_pass verdict")
+
+    real_ds = None
+    if args.real_bench_path:
+        real_records = load_manifests(args.real_bench_path)
+        real_ds = ManifestDataset(records=real_records,
+                                  audio_root=Path(args.real_bench_path) / "audio")
+    else:
+        print("tier 4a skipped -- pass --real-bench-path to include it")
+
     model, processor = load_for_eval(cfg["base_model"], checkpoint_dir)
-    n_scaled = set_lambda(model, args.lam)
-    print(f"set_lambda: {n_scaled} LoRA layers scaled to lambda={args.lam}")
 
     norm_cfg = cfg["normalization"]
     normalizer = Normalizer(
@@ -113,58 +145,62 @@ def main() -> None:
         filler_tokens=norm_cfg["filler_tokens"],
     )
     eval_cfg = SimpleNamespace(**cfg["eval"])
+    meeting_to_source = _meeting_to_source(test_records)
 
-    summary = {"lambda": args.lam, "run_dir": str(run_dir)}
+    summaries = []
+    for lam in args.lam:
+        out_dir = out_root / f"lambda{lam}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        n_scaled = set_lambda(model, lam)
+        print(f"\nset_lambda: {n_scaled} LoRA layers scaled to lambda={lam}")
 
-    test_metrics = _eval_split(model, processor, test_ds, normalizer, eval_cfg,
-                               desc=f"tier1_in_domain:lambda={args.lam}")
-    test_predictions = test_metrics.pop("_predictions")
-    write_predictions(test_predictions, out_dir / "predictions_tier1_in_domain.csv")
+        summary = {"lambda": lam, "run_dir": str(run_dir)}
 
-    baseline_test_csv = run_dir / "audit" / "predictions_baseline_test.csv"
-    baseline_test_rows = None
-    if baseline_test_csv.exists():
-        with open(baseline_test_csv, encoding="utf-8") as f:
-            baseline_test_rows = list(csv.DictReader(f))
-    else:
-        print(f"WARNING: {baseline_test_csv} missing -- no baseline, no pass/retention_pass verdict")
+        test_metrics = _eval_split(model, processor, test_ds, normalizer, eval_cfg,
+                                   desc=f"tier1_in_domain:lambda={lam}")
+        test_predictions = test_metrics.pop("_predictions")
+        write_predictions(test_predictions, out_dir / "predictions_tier1_in_domain.csv")
 
-    summary["tier1_cer"] = test_metrics["cer"]
-    summary["tier1_by_source"] = _score_by_source(
-        test_predictions, _meeting_to_source(test_records), baseline_test_rows,
-        cfg["gates"]["min_improvement_pct"], Gates().max_retention_regression_pp,
-    )
+        summary["tier1_cer"] = test_metrics["cer"]
+        summary["tier1_by_source"] = _score_by_source(
+            test_predictions, meeting_to_source, baseline_test_rows,
+            cfg["gates"]["min_improvement_pct"], Gates().max_retention_regression_pp,
+        )
 
-    if args.real_bench_path:
-        real_records = load_manifests(args.real_bench_path)
-        real_ds = ManifestDataset(records=real_records,
-                                  audio_root=Path(args.real_bench_path) / "audio")
-        real_metrics = _eval_split(model, processor, real_ds, normalizer, eval_cfg,
-                                   desc=f"tier4a_real:lambda={args.lam}")
-        real_predictions = real_metrics.pop("_predictions")
-        write_predictions(real_predictions, out_dir / "predictions_tier4a_real.csv")
-        summary["tier4a_cer"] = score_real(rejoin_real_chunks(real_predictions))["cer"]
-        summary["tier4a_retention"] = english_token_retention(
-            [p["ref"] for p in real_predictions], [p["hyp"] for p in real_predictions])["retention"]
-    else:
-        print("tier 4a skipped -- pass --real-bench-path to include it")
+        if real_ds is not None:
+            real_metrics = _eval_split(model, processor, real_ds, normalizer, eval_cfg,
+                                       desc=f"tier4a_real:lambda={lam}")
+            real_predictions = real_metrics.pop("_predictions")
+            write_predictions(real_predictions, out_dir / "predictions_tier4a_real.csv")
+            summary["tier4a_cer"] = score_real(rejoin_real_chunks(real_predictions))["cer"]
+            summary["tier4a_retention"] = english_token_retention(
+                [p["ref"] for p in real_predictions],
+                [p["hyp"] for p in real_predictions])["retention"]
 
-    (out_dir / "summary.json").write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        (out_dir / "summary.json").write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        summaries.append(summary)
 
-    print(f"\n{'slice':12s} {'CER@' + str(args.lam):>12s} {'CER@0.25':>12s} "
-          f"{'ret@' + str(args.lam):>12s} {'ret@0.25':>12s}")
-    for source, entry in summary["tier1_by_source"].items():
-        shipped = SHIPPED.get(source, {})
-        print(f"{source:12s} {entry['cer']:12.4f} {shipped.get('cer', float('nan')):12.4f} "
-              f"{entry['retention']:12.4f} {shipped.get('retention', float('nan')):12.4f}")
-    if "tier4a_cer" in summary:
-        print(f"{'real':12s} {summary['tier4a_cer']:12.4f} {SHIPPED['real']['cer']:12.4f} "
-              f"{summary['tier4a_retention']:12.4f} {SHIPPED['real']['retention']:12.4f}")
+    print(f"\n{'lambda':>7s} {'slice':10s} {'CER':>9s} {'CER@0.25':>9s} "
+          f"{'retention':>10s} {'ret@0.25':>9s} {'pass':>6s} {'ret_pass':>9s}")
+    for summary in summaries:
+        lam = summary["lambda"]
+        for source, entry in summary["tier1_by_source"].items():
+            shipped = SHIPPED.get(source, {})
+            print(f"{lam:7.2f} {source:10s} {entry['cer']:9.4f} "
+                  f"{shipped.get('cer', float('nan')):9.4f} {entry['retention']:10.4f} "
+                  f"{shipped.get('retention', float('nan')):9.4f} "
+                  f"{str(entry.get('pass')):>6s} {str(entry.get('retention_pass')):>9s}")
+        if "tier4a_cer" in summary:
+            print(f"{lam:7.2f} {'real':10s} {summary['tier4a_cer']:9.4f} "
+                  f"{SHIPPED['real']['cer']:9.4f} {summary['tier4a_retention']:10.4f} "
+                  f"{SHIPPED['real']['retention']:9.4f} {'':>6s} {'':>9s}")
 
-    print(f"\nlambda={args.lam} beats the shipped lambda=0.25 only if BOTH CER holds and "
-          "retention rises -- CER alone is what let the regression ship (SESSIONS.md H4).")
-    print(f"wrote {out_dir}")
+    print("\nA lambda beats the shipped 0.25 only if BOTH CER holds and retention rises -- "
+          "CER alone is what let the regression ship (SESSIONS.md H4). Retention covers only "
+          "English tokens, so it cannot see general-Vietnamese loss; read it next to the sweep's "
+          "own ood_cer column, where lambda=1.0 sits 0.00027 under the budget bound.")
+    print(f"wrote {out_root}")
 
 
 if __name__ == "__main__":
