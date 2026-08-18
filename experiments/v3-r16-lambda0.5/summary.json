@@ -1,0 +1,57 @@
+{
+  "lambda": 0.5,
+  "run_dir": "/kaggle/input/datasets/winhkento/h6-artifacts/v3-r16",
+  "tier1_cer": 0.08052556104376815,
+  "tier1_by_source": {
+    "youtube": {
+      "cer": 0.1205237515225335,
+      "wer": 0.16097560975609757,
+      "n_segments": 228,
+      "char_ref_len": 49260,
+      "ci": [
+        0.1054756842166865,
+        0.1376303780964798
+      ],
+      "retention": 0.7745995423340961,
+      "cer_baseline": 0.1593382054405197,
+      "ci_baseline": [
+        0.12048760499897562,
+        0.2334485773326975
+      ],
+      "retention_baseline": 0.36384439359267734,
+      "bound": 0.14340438489646773,
+      "pass": true,
+      "retention_pass": true,
+      "delta_ci": [
+        -0.007128829536527895,
+        0.11635670004768717
+      ],
+      "verdict": "INCONCLUSIVE"
+    },
+    "synthetic": {
+      "cer": 0.019579943703795354,
+      "wer": 0.02967121090617482,
+      "n_segments": 426,
+      "char_ref_len": 32329,
+      "ci": [
+        0.01607217928402807,
+        0.023264505278893767
+      ],
+      "retention": 0.8308977035490606,
+      "cer_baseline": 0.04259333725138421,
+      "ci_baseline": [
+        0.03780256517406538,
+        0.047309688850206706
+      ],
+      "retention_baseline": 0.55741127348643,
+      "bound": 0.03833400352624579,
+      "pass": true,
+      "retention_pass": true,
+      "delta_ci": [
+        0.01912826292223813,
+        0.026763771503926153
+      ],
+      "verdict": "IMPROVED"
+    }
+  }
+}

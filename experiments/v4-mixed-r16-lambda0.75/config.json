@@ -1,0 +1,82 @@
+{
+  "run_id": "v4-mixed-r16",
+  "base_model": "vinai/PhoWhisper-large",
+  "data": {
+    "dataset_path": "/kaggle/working/dataset/mixed-noisy-v1",
+    "ood_eval_path": "/kaggle/working/Reworkwhisper-finetune/dataset/vivos",
+    "real_bench_path": "/kaggle/input/datasets/winhkento/real-meetings-bench/real-meetings-bench",
+    "real_clip_path": null,
+    "val_meetings": [
+      "paid_meeting_0001",
+      "paid_meeting_0002",
+      "paid_meeting_0011",
+      "rCd8DSMk3-c"
+    ]
+  },
+  "seed": 42,
+  "normalization": {
+    "strip_punctuation": true,
+    "lowercase": true,
+    "number_convention": "word_to_digit",
+    "audit_conversions": true,
+    "filler_tokens": [
+      "ừm",
+      "ờm",
+      "ehm",
+      "uhm",
+      "hmm"
+    ]
+  },
+  "eval": {
+    "split": "test",
+    "limit": null,
+    "batch_size": 8,
+    "num_beams": 1,
+    "language": "vi"
+  },
+  "lora": {
+    "rank": 16,
+    "alpha": 32,
+    "target_modules": [
+      "q_proj",
+      "k_proj",
+      "v_proj",
+      "out_proj",
+      "fc1",
+      "fc2"
+    ],
+    "dropout": 0.05,
+    "use_rslora": true,
+    "min_retained_energy": 0.99
+  },
+  "training": {
+    "learning_rate": 0.0002,
+    "epochs": 3,
+    "batch_size": 2,
+    "grad_accum_steps": 8,
+    "warmup_ratio": 0.1,
+    "full_finetune": false,
+    "gradient_checkpointing": true,
+    "limit": null
+  },
+  "sweep": {
+    "lambdas": [
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "ood_cer_budget": 0.02,
+    "elbow_ratio_threshold": 10.0
+  },
+  "gates": {
+    "min_improvement_pct": 10.0,
+    "real_cer_regression_pp": 0.0
+  },
+  "hub": {
+    "push": false,
+    "repo_id": null,
+    "private": true
+  }
+}

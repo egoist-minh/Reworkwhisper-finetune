@@ -20,11 +20,16 @@ The HF token is read from the environment (HF_TOKEN), never from config, never
 written into the model card.
 
     python -m scripts.merge_and_push \
-        --run-dir outputs/v4-mixed-r16 \
-        --adapter winhsss/Reworkwhisper-large-v5 \
+        --run-dir experiments/v4-mixed-r16-lambda0.75 \
+        --adapter /kaggle/input/.../lambda075-adapter \
         --repo-id winhsss/Reworkwhisper-large-v5 \
-        --out /kaggle/working/merged-v4-mixed-r16 \
-        --delete-remote-adapter --confirm
+        --out /kaggle/working/merged-v4-mixed-r16-lambda0.75 \
+        --production-predictions experiments/v3-r16-lambda0.5/predictions_tier1_in_domain.csv \
+        --confirm
+
+`--delete-remote-adapter` is for pushing over a repo that still holds an adapter.
+The v5 publish deletes and recreates the repo by hand instead, so there is
+nothing remote to clean up -- see `notebooks/merge-and-push.ipynb`.
 """
 
 import argparse
@@ -186,6 +191,10 @@ def model_card(repo_id: str, cfg: dict, gate: dict, lam: float) -> str:
     rows = "\n".join(
         f"| {tier} | {row['cer']:.4f} | {row['bound']:.4f} | {row['pass']} |"
         for tier, row in gate.items() if isinstance(row, dict) and "cer" in row)
+    # A lambda a human picked over select_lambda's is not the same claim as one the
+    # rule chose, and the card is where that distinction has to survive publication.
+    source = gate.get("_lambda_source")
+    lam_source = f"\n- lambda source: {source}" if source else ""
     return f"""# {repo_id}
 
 `{cfg['base_model']}` with the run `{cfg['run_id']}` LoRA adapter **merged into the
@@ -201,7 +210,7 @@ Weights are stored fp32 (the merge was computed fp32); pass
 `torch_dtype=torch.float16` at load time for fp16 inference.
 
 - LoRA rank {cfg['lora']['rank']}, alpha {cfg['lora']['alpha']}, targets `{', '.join(cfg['lora']['target_modules'])}`
-- Shipped at lambda = {lam} (adapter delta scaled by {lam} before merging)
+- Shipped at lambda = {lam} (adapter delta scaled by {lam} before merging){lam_source}
 - Pipeline commit `{_git_commit()}`, run `{cfg['run_id']}`
 
 ## Gate results (lambda = {lam})

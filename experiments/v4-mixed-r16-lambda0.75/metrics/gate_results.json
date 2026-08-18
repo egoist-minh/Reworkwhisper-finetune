@@ -1,0 +1,103 @@
+{
+  "tier1_in_domain": {
+    "cer": 0.04217480297589136,
+    "bound": 0.10177107208079521,
+    "pass": true,
+    "by_source": {
+      "youtube": {
+        "cer": 0.05929760454730004,
+        "wer": 0.09370988446726572,
+        "n_segments": 228,
+        "char_ref_len": 49260,
+        "ci": [
+          0.05419336581027268,
+          0.06450873794496866
+        ],
+        "retention": 0.8546910755148741,
+        "cer_baseline": 0.1593382054405197,
+        "ci_baseline": [
+          0.12048760499897562,
+          0.2334485773326975
+        ],
+        "retention_baseline": 0.36384439359267734,
+        "bound": 0.14340438489646773,
+        "pass": true,
+        "retention_pass": true,
+        "delta_ci": [
+          0.061855051595872325,
+          0.17345204370700124
+        ],
+        "verdict": "IMPROVED"
+      },
+      "synthetic": {
+        "cer": 0.016084629898852423,
+        "wer": 0.023656776263031275,
+        "n_segments": 426,
+        "char_ref_len": 32329,
+        "ci": [
+          0.013144743616924614,
+          0.018919003997859413
+        ],
+        "retention": 0.8622129436325678,
+        "cer_baseline": 0.04259333725138421,
+        "ci_baseline": [
+          0.03780256517406538,
+          0.047309688850206706
+        ],
+        "retention_baseline": 0.55741127348643,
+        "bound": 0.03833400352624579,
+        "pass": true,
+        "retention_pass": true,
+        "delta_ci": [
+          0.0223592672479266,
+          0.0306186276349534
+        ],
+        "verdict": "IMPROVED"
+      }
+    },
+    "normalization_check": {
+      "word_to_digit": 0.04217480297589136,
+      "as_written": 0.04378827381313284,
+      "delta_pp": 0.161
+    }
+  },
+  "tier2_ood": {
+    "cer": 0.033427152841466114,
+    "bound": 0.04283292748489928,
+    "pass": true
+  },
+  "tier4a_real": {
+    "cer": 0.2440065569291715,
+    "ci": [
+      0.14039829744928076,
+      0.3820047674841421
+    ],
+    "bound": 0.3157229697425039,
+    "pass": true,
+    "by_meeting": {
+      "real_0001": {
+        "cer": 0.24912280701754386,
+        "wer": 0.30773955773955775,
+        "n_segments": 115
+      },
+      "real_0002": {
+        "cer": 0.2396928306162271,
+        "wer": 0.2709245428792171,
+        "n_segments": 81
+      }
+    },
+    "delta_ci": [
+      0.040071321321321296,
+      0.11793760216047189
+    ],
+    "verdict": "IMPROVED",
+    "normalization_check": {
+      "word_to_digit": 0.2440065569291715,
+      "as_written": 0.25183779938344797,
+      "delta_pp": 0.783
+    }
+  },
+  "overall_pass": true,
+  "_lambda": 0.75,
+  "_lambda_source": "human override of select_lambda, recorded in SESSIONS.md -- the rule optimises val CER against OOD CER and cannot see english_token_retention"
+}
