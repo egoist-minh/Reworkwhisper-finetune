@@ -1,0 +1,45 @@
+{
+  "tier1_in_domain": {
+    "cer": 0.01710538525781806,
+    "bound": 0.03833400352624579,
+    "pass": true
+  },
+  "tier2_ood": {
+    "cer": 0.041428164827171814,
+    "bound": 0.04283292748489928,
+    "pass": true
+  },
+  "tier4a_real": {
+    "cer": 0.3506591079844273,
+    "ci": [
+      0.25304724488768005,
+      0.47757100054859264
+    ],
+    "bound": 0.3157229697425039,
+    "pass": false,
+    "by_meeting": {
+      "real_0001": {
+        "cer": 0.36961552818215754,
+        "wer": 0.4391891891891892,
+        "n_segments": 115
+      },
+      "real_0002": {
+        "cer": 0.3346761503115755,
+        "wer": 0.3700746845222766,
+        "n_segments": 81
+      }
+    },
+    "delta_ci": [
+      -0.08355510064824295,
+      0.027757580941790316
+    ],
+    "verdict": "INCONCLUSIVE",
+    "normalization_check": {
+      "word_to_digit": 0.480078044773054,
+      "as_written": 0.4852127262232182,
+      "delta_pp": 0.513
+    },
+    "_note": "rescored at parent-segment level, rejoin fix 2026-08-04 -- pre-fix chunk-level numbers in gate_results.pre_rejoin_fix.json; normalization_check below predates the fix, left as-is"
+  },
+  "overall_pass": false
+}
