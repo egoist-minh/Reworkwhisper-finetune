@@ -82,11 +82,13 @@ The test: could the reader grep the term and find it — in this repo, in a depe
 
 ## Project Context: Fine_tune_wf
 
-Full design spec, module contracts, config schema, and gate rules live in `PROJECT_CORE.md` — read it before touching pipeline code. This section holds what that doc doesn't: operational facts, gotchas, and things that will bite you if assumed.
+Full design spec, module contracts, config schema, and gate rules live in `PROJECT_CORE.md` — read it before touching pipeline code. **How to actually run either pipeline — every command, artifact and gate, in order — lives in `docs/runbook.md`.** This section holds what neither doc does: operational facts, gotchas, and things that will bite you if assumed.
 
 ### State right now
 
-As of 2026-08-11, `src/`, `configs/`, `scripts/`, `tests/`, `dataset/` and one real run's artifacts (`Outputs/v3-r16/`) all exist. The pipeline has run end-to-end on Kaggle T4. Still check before assuming a specific module or config field is present — anything described below as "planned" or "todo" (see `SESSIONS.md`) does not exist on disk until it's built.
+As of 2026-09-09, `src/`, `configs/`, `scripts/`, `tests/`, `dataset/` and two runs' artifacts (`Outputs/v3-r16/`, `Outputs/v4-mixed-r16/`) all exist. Both have run end-to-end on Kaggle T4 and both are published: `Reworkwhisper-large-v4` = `v3-r16` at λ=0.5, `Reworkwhisper-large-v5` = `v4-mixed-r16` at λ=0.75 (in production since 2026-08-18). Repo names lag run ids — don't map them by number.
+
+Two things the config claims that the local disk does not have: `data.dataset_path` points at `dataset/mixed-noisy-v1`, which was built on Kaggle and never on this machine; and `dataset/youtube-meetings/manifest.*.jsonl` here is the **pre-review** snapshot (all `verified: false`) even though the corpus that trained `v4-mixed-r16` was reviewed 790/790. Still check before assuming a specific module or config field is present — anything described below as "planned" or "todo" (see `SESSIONS.md`) does not exist on disk until it's built.
 
 ### Relationship to `D:\phowhisper-finetune-exp`
 
@@ -112,15 +114,17 @@ That's the predecessor repo — real git history, real training runs, real evide
 - Code-switch detection: don't whitelist English words (72% false-positive rate observed). Use the Vietnamese syllable-shape regex test instead (see `PROJECT_CORE.md` §4).
 - `unpaid-dataset`, `dataset_by_task` haven't been profiled yet — don't assume these same warnings apply until someone checks. `done/` has been profiled (2026-07-31) and has its own set of caveats — reference transcript is post-edited PhoWhisper-small output, mixed number conventions, segments up to 212 s. See `PROJECT_CORE.md` §4 before using any tier-4 number.
 
-### Kaggle runner notebook (`notebooks/fine-tune-workflow.ipynb`)
+### Kaggle runner notebooks — two files, don't mix them up
 
-Downloaded back from Kaggle on 2026-08-11 — it is the **executed** notebook of the v3-r16 session (cells 1–16 have real execution counts and preserved outputs), not a template. It replaces `notebooks/run_pipeline.ipynb`, which was the unexecuted version of the same 28 cells. Treat it as the record of what actually ran, and as the source of truth for the Kaggle-side edits the local copy never had:
+`notebooks/fine-tune-workflow.ipynb` is the **current template**: 35 cells, zero execution counts, `RUN_ID = "v4-mixed-r16"`. This is the one to edit and run. `docs/runbook.md` Part B walks it cell by cell.
 
-- **Real mount paths are nested**: `/kaggle/input/datasets/<user>/<slug>/<slug>`, not `/kaggle/input/<slug>`. Cell 3 (`!ls -la /kaggle/input`) exists to confirm this before Cell 7 sets `DATASET_PATH` / `REAL_BENCH_PATH` — always re-run it, the shape has bitten this project once already.
-- **`TRANSFORMERS_AUTO_CONVERSION=0` is required**, set twice: as an env var in Cell 2 and inline on the `--stage baseline` command. Don't drop either when editing.
-- **Its `RUN_ID` cell still reads `"v0-r16"`**, so its output paths say `outputs/v0-r16/`. The same run's stored artifacts here are `Outputs/v3-r16/` (whose `config.json` says `run_id: v3-r16`). Same run, different label — never cite the notebook's directory names.
-- **Its `gate_results.json` output (Cell 24) is pre-rejoin-fix**: tier4a real CER 48.01% vs. baseline 45.76%, 146+118 segments. The authoritative rescored numbers are in `Outputs/v3-r16/metrics/gate_results.json` (35.07% vs. 31.57%, 115+81 segments, `_note` records the 2026-08-04 fix). Quote the stored file, not the notebook cell.
-- Run cost for scale: 3 epochs, 801 steps, **6 h 31 m** on a single T4 for PhoWhisper-large at `lora.rank=16`.
+`notebooks/fine-tune-workflow.v3-r16-executed.ipynb` is the **executed record** of the v3-r16 session: 30 cells, 14 with real execution counts and preserved outputs. Reference only.
+
+- **Real mount paths are nested**: `/kaggle/input/datasets/<user>/<slug>/<slug>`, not `/kaggle/input/<slug>`. The `!ls -la /kaggle/input` cell exists to confirm this before `DATASET_PATH` / `REAL_BENCH_PATH` are set — always re-run it, the shape has bitten this project once already.
+- **`TRANSFORMERS_AUTO_CONVERSION=0` is required**, set twice: as an env var in the clone cell and inline on the `--stage baseline` command. Don't drop either when editing.
+- **The executed notebook's source and its own outputs disagree on the run's name.** Its `RUN_ID` cell was later edited to `v4-mixed-r16`, but its 47 preserved output paths still say `outputs/v0-r16/`; the same run's stored artifacts here are `Outputs/v3-r16/` (whose `config.json` says `run_id: v3-r16`). Three labels, one run — never cite a directory name from that notebook.
+- **Its `gate_results.json` output is pre-rejoin-fix**: tier4a real CER 48.01% vs. baseline 45.76%, 146+118 segments. The authoritative rescored numbers are in `Outputs/v3-r16/metrics/gate_results.json` (35.07% vs. 31.57%, 115+81 segments, `_note` records the 2026-08-04 fix). Quote the stored file, not the notebook cell.
+- Run cost for scale: 3 epochs, 801 steps, **6 h 31 m** on a single T4 for PhoWhisper-large at `lora.rank=16`, batch 2 × grad_accum 8.
 
 ### Whisper/LoRA specifics
 
