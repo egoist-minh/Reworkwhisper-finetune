@@ -12,4 +12,7 @@ never sees the local `outputs/` tree.
 | `metrics/gate_results.json` | `overall_pass` check, model-card gate table |
 | `metrics/lambda_sweep.csv` | cross-check that the adapter's baked λ is the row the gate scored |
 
-The full run artifacts stay in `Outputs/outputs_v4-mixed-r16.zip`.
+The full run artifacts stay in `Outputs/v4-mixed-r16/`. The zip that used to sit
+next to it (`Outputs/outputs_v4-mixed-r16.zip`) was deleted 2026-09-09 as a
+byte-for-byte duplicate of that directory; re-zip the directory if a Kaggle
+upload needs one.
