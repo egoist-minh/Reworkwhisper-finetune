@@ -997,17 +997,18 @@ blockquote strong{color:var(--fg);}
       <h2>Bảng điểm — so với số công bố của PhoWhisper</h2>
       <div class="meta">
         <span class="badge">VIVOS: ngoài miền, kiểm tra quên</span>
-        <span class="badge">trong miền: họp giả lập</span>
+        <span class="badge">trong miền: họp giả lập (lần 4: giả lập + họp thật)</span>
         <span class="badge">% · thấp hơn tốt hơn</span>
       </div>
 
       <div class="table-wrap">
       <table class="dense grid">
         <colgroup>
-          <col style="width:15%"><col style="width:12%">
-          <col style="width:6.5%"><col style="width:11%">
-          <col style="width:6.5%"><col style="width:10.5%"><col style="width:11%">
-          <col style="width:6.5%"><col style="width:10%"><col style="width:11%">
+          <col style="width:13%"><col style="width:9%">
+          <col style="width:5.5%"><col style="width:8.5%">
+          <col style="width:5.5%"><col style="width:8%"><col style="width:8.5%">
+          <col style="width:5.5%"><col style="width:7.5%"><col style="width:8.5%">
+          <col style="width:5.5%"><col style="width:7.5%"><col style="width:7.5%">
         </colgroup>
         <thead>
           <tr>
@@ -1016,6 +1017,7 @@ blockquote strong{color:var(--fg);}
             <th class="gsep" colspan="2">Lần 1 · <code>dataset-dot1</code></th>
             <th class="gsep" colspan="3">Lần 2 · <code>paid-dataset</code></th>
             <th class="gsep" colspan="3">Lần 3 · <code>paid-dataset-v2</code></th>
+            <th class="gsep" colspan="3">Lần 4 · <code>mixed-noisy-v1</code></th>
           </tr>
           <tr class="mh">
             <th class="gsep"><code>vinai/PhoWhisper-large</code></th>
@@ -1027,6 +1029,9 @@ blockquote strong{color:var(--fg);}
             <th class="gsep">base</th>
             <th>adapter <code>v3-r16</code> <em>chưa publish</em></th>
             <th><code>Reworkwhisper-large-v4</code> <em>← xuất bản</em></th>
+            <th class="gsep">base</th>
+            <th>adapter <code>v4-mixed-r16</code> <em>chưa publish</em></th>
+            <th><code>Reworkwhisper-large-v5</code> <em>← xuất bản</em></th>
           </tr>
         </thead>
         <tbody>
@@ -1036,6 +1041,7 @@ blockquote strong{color:var(--fg);}
             <td class="num gsep">—</td><td class="num">1.0</td>
             <td class="num gsep">—</td><td class="num">1.0</td><td class="num">0.5</td>
             <td class="num gsep">—</td><td class="num">1.0</td><td class="num">0.5</td>
+            <td class="num gsep">—</td><td class="num">1.0</td><td class="num">0.75</td>
           </tr>
           <tr class="lam">
             <th scope="row">n câu — VIVOS / trong miền</th>
@@ -1043,6 +1049,7 @@ blockquote strong{color:var(--fg);}
             <td class="num gsep">760 / 500</td><td class="num">760 / 500</td>
             <td class="num gsep">760 / 236</td><td class="num">760 / 236</td><td class="num">760 / 236</td>
             <td class="num gsep">760 / 426</td><td class="num">760 / 426</td><td class="num">760 / 426</td>
+            <td class="num gsep">760 / 654</td><td class="num">760 / 654</td><td class="num">760 / 654</td>
           </tr>
           <tr>
             <th scope="row">VIVOS · CER <em>ngoài miền</em></th>
@@ -1050,6 +1057,7 @@ blockquote strong{color:var(--fg);}
             <td class="num gsep">1.78</td><td class="num">4.42</td>
             <td class="num gsep">2.16</td><td class="num">4.32</td><td class="num"><strong>2.21</strong></td>
             <td class="num gsep">2.28</td><td class="num">4.14</td><td class="num"><strong>2.49</strong></td>
+            <td class="num gsep">2.28</td><td class="num">4.26</td><td class="num"><strong>3.34</strong></td>
           </tr>
           <tr>
             <th scope="row">VIVOS · WER</th>
@@ -1057,13 +1065,15 @@ blockquote strong{color:var(--fg);}
             <td class="num gsep">4.57</td><td class="num">8.12</td>
             <td class="num gsep">4.61</td><td class="num">—</td><td class="num"><strong>4.75</strong></td>
             <td class="num gsep">4.73</td><td class="num">8.74</td><td class="num"><strong>—</strong></td>
+            <td class="num gsep">—</td><td class="num">—</td><td class="num"><strong>—</strong></td>
           </tr>
           <tr>
-            <th scope="row">Trong miền · CER <em>họp giả lập</em></th>
+            <th scope="row">Trong miền · CER <em>lần 1–3 họp giả lập · lần 4 hỗn hợp</em></th>
             <td class="num gsep"></td>
             <td class="num gsep">29.65</td><td class="num"><strong>18.53</strong></td>
             <td class="num gsep">5.11</td><td class="num">1.29</td><td class="num"><strong>1.65</strong></td>
             <td class="num gsep">4.26</td><td class="num">1.71</td><td class="num"><strong>1.96</strong></td>
+            <td class="num gsep">11.31</td><td class="num">—</td><td class="num"><strong>4.22</strong></td>
           </tr>
           <tr>
             <th scope="row">Trong miền · WER</th>
@@ -1071,19 +1081,24 @@ blockquote strong{color:var(--fg);}
             <td class="num gsep">47.02</td><td class="num"><strong>26.92</strong></td>
             <td class="num gsep">8.29</td><td class="num">2.56</td><td class="num"><strong>3.19</strong></td>
             <td class="num gsep">7.40</td><td class="num">2.50</td><td class="num"><strong>2.97</strong></td>
+            <td class="num gsep">—</td><td class="num">—</td><td class="num"><strong>—</strong></td>
           </tr>
         </tbody>
       </table>
       </div>
 
       <div class="note cols2">
-        <span class="note-title">Ba điểm dễ gây hiểu sai</span>
+        <span class="note-title">Bốn điểm dễ gây hiểu sai</span>
         <p>(1) <strong>Paper không công bố CER, chỉ công bố WER</strong> — để so sánh với cột Paper, cần đọc
         hàng WER.</p>
-        <p>(2) Hai hàng "trong miền" <strong>không so được ngang giữa ba lần</strong> vì ba dataset
+        <p>(2) Hai hàng "trong miền" <strong>không so được ngang giữa bốn lần</strong> vì bốn dataset
         khác nhau; mỗi lần có cột base riêng để so sánh dọc trong cùng lần đó.</p>
         <p>(3) Cùng một mô hình base, ba lần đo VIVOS ra ba số (1.78 / 2.16 / 2.28) vì ba cách nạp
         dữ liệu khác nhau — <strong>không nên lấy hiệu số tuyệt đối giữa các nhóm cột</strong>.</p>
+        <p>(4) <strong>Tập "trong miền" của lần 4 khác loại</strong>: 426 câu giả lập + 228 đoạn họp thật
+        từ YouTube, trong đó phần thật chiếm 60% ký tự tham chiếu. Base 11.31 cao là vì thế, không phải vì
+        mô hình nền tệ đi. Tách theo nguồn: giả lập 4.26 → <strong>1.61</strong>, YouTube 15.93 →
+        <strong>5.93</strong>.</p>
       </div>
     </div>
   </section>
@@ -1091,7 +1106,7 @@ blockquote strong{color:var(--fg);}
   <!-- 17 · ratio table ................................. -->
   <section class="slide">
     <div class="slide-inner">
-      <h2>Tỉ lệ so với base — cơ sở duy nhất để so sánh giữa ba lần</h2>
+      <h2>Tỉ lệ so với base — cơ sở duy nhất để so sánh giữa bốn lần</h2>
       <div class="meta"><span class="badge">mỗi lần chia cho base của chính nó</span></div>
 
       <div class="table-wrap">
@@ -1105,6 +1120,8 @@ blockquote strong{color:var(--fg);}
           <tr><td class="model"><code>reworkwhisper-large-v3-0.5lamda</code></td><td class="num">0.5</td><td class="num"><strong>×1.02 ✓</strong></td><td class="num"><strong>−67.6%</strong></td></tr>
           <tr><td class="model">adapter <code>v3-r16</code></td><td class="num">1.0</td><td class="num">×1.81 ❌</td><td class="num">−59.8%</td></tr>
           <tr><td class="model"><code>Reworkwhisper-large-v4</code></td><td class="num">0.5</td><td class="num"><strong>×1.09 ✓</strong></td><td class="num"><strong>−54.0%</strong></td></tr>
+          <tr><td class="model">adapter <code>v4-mixed-r16</code></td><td class="num">1.0</td><td class="num">×1.86 ❌</td><td class="num">—</td></tr>
+          <tr><td class="model"><code>Reworkwhisper-large-v5</code></td><td class="num">0.75</td><td class="num"><strong>×1.46 ⚠</strong></td><td class="num"><strong>−62.7%</strong></td></tr>
         </tbody>
       </table>
       </div>
@@ -1124,15 +1141,21 @@ blockquote strong{color:var(--fg);}
       WER 4.67; chúng tôi đo lại base được 4.57 / 4.61 / 4.73 qua ba pipeline. Sai lệch tối đa 0.10pp, là
       căn cứ cho độ tin cậy của phần còn lại trong bảng.</p>
 
-      <p class="body-text"><strong>2 · λ=1.0 luôn gây suy giảm tiếng Việt tổng quát.</strong> ×2.48 · ×2.00 · ×1.81.
-      Ba lần, hai dataset — không phải hiện tượng ngẫu nhiên của một lần chạy.</p>
+      <p class="body-text"><strong>2 · λ=1.0 luôn gây suy giảm tiếng Việt tổng quát.</strong> ×2.48 · ×2.00 · ×1.81 · ×1.86.
+      Bốn lần, ba dataset — không phải hiện tượng ngẫu nhiên của một lần chạy.</p>
 
       <p class="body-text"><strong>3 · λ=0.5 khắc phục được hiện tượng này.</strong> ×1.02 và ×1.09, gần như
       bằng base, trong khi vẫn giữ hơn một nửa phần cải thiện trong miền.</p>
 
-      <p class="body-text"><strong>4 · <code>Reworkwhisper-large-v4</code> có cơ sở vững nhất.</strong> Giảm
-      hơn một nửa CER trong miền, và là mô hình duy nhất có <strong>giọng test không xuất hiện trong train</strong>;
+      <p class="body-text"><strong>4 · <code>Reworkwhisper-large-v4</code> sạch nhất về mặt đo.</strong> Giảm
+      hơn một nửa CER trong miền, và <strong>giọng test không xuất hiện trong train</strong>;
       hai mô hình trước đo trên giọng đã có mặt khi huấn luyện.</p>
+
+      <p class="body-text"><strong>5 · <code>Reworkwhisper-large-v5</code> giảm CER nhiều nhất, nhưng là một
+      cuộc đánh đổi có chủ ý.</strong> −62.7% trong miền và là bản duy nhất được đo trên audio họp thật, đổi
+      lại VIVOS ×1.46 — tệ hơn hẳn ×1.09 của <code>v4</code>. λ=0.75 do người chọn, không phải luật chọn tự
+      động, vì luật không nhìn chỉ số giữ từ tiếng Anh. Tính tách biệt giọng chỉ chắc ở nửa giả lập: nửa
+      YouTube chia theo <code>meeting_id</code>, chưa kiểm người nói có trùng giữa train và test không.</p>
       </div>
     </div>
   </section>
@@ -1156,15 +1179,25 @@ blockquote strong{color:var(--fg);}
         </div>
         <div class="sumrow">
           <div class="k">04/08</div>
-          <div class="v"><strong>Kết quả hiện tại</strong> — tái lập trên dataset lớn hơn,
-          lần đầu đo được năng lực trên giọng lạ.<br>
+          <div class="v"><strong>Tái lập trên dataset lớn hơn</strong> — lần đầu đo được năng lực trên
+          giọng lạ.<br>
           <code>winhsss/Reworkwhisper-large-v4</code>
           <em>· paid-dataset-v2 · 4,270 segment train · giọng tách biệt hoàn toàn</em></div>
         </div>
+        <div class="sumrow">
+          <div class="k">18/08</div>
+          <div class="v"><strong>Kết quả hiện tại</strong> — đưa audio họp thật vào tập train; CER trên
+          họp YouTube 15.93 → 5.93, trên <code>real-meetings-bench</code> 31.57 → 24.40 (lần đầu kết luận
+          được là có cải thiện). Đổi lại VIVOS xấu đi 2.28 → 3.34.<br>
+          <code>winhsss/Reworkwhisper-large-v5</code>
+          <em>· mixed-noisy-v1 · 4,717 segment train · 3.46 giờ audio thật</em></div>
+        </div>
       </div>
       <blockquote>
-        Công việc còn lại: bổ sung audio họp thật vào tập train. Đây là hướng duy nhất chưa được triển khai,
-        và cũng là phần duy nhất kết quả chưa thể kết luận.
+        Công việc còn lại: audio thật mới chỉ có 3.46 giờ và toàn là họp online — chưa có phòng họp
+        vật lý. Chữ hoa tên riêng vẫn hỏng vì nhãn YouTube viết thường toàn bộ, đổi λ không sửa được.
+        Và trên một tập 3 cuộc họp YouTube khác, soát tay 100%, ElevenLabs Scribe v2 vẫn dẫn trước:
+        WER 11.6% so với 14.0% (27/08).
       </blockquote>
     </div>
   </section>

@@ -4,7 +4,8 @@ Model gọi bằng **đúng tên trên HuggingFace**, không dùng nhãn "v1/v2/
 của HF (`v1 → v3 → v4`), với run ID (`dot1-v1-lora` / `v1c-r16-valfix` / `v3-r16`) và với tên
 dataset (`paid-dataset-v2`).
 
-Lần 4 **chưa publish** nên gọi bằng run ID `v4-mixed-r16`. Đừng gọi tắt là "v4": tên
+Lần 4 publish thành **`Reworkwhisper-large-v5`** ở λ=0,75 (2026-08-18). Ảnh trong thư mục này vẫn
+đặt tên theo run ID `v4-mixed-r16` vì chúng sinh ra trước lúc publish. Đừng gọi tắt là "v4": tên
 `Reworkwhisper-large-v4` đã thuộc về lần 3.
 
 Trình bày theo **hai bước, đúng thứ tự này**:
@@ -22,15 +23,16 @@ giải thích. Đường OOD chính là lý do phải có bước 2, không ph�
 | 1 · 23/07 | `reworkwhisper-large-v1_training-curve.png` | — (không sweep λ) | `reworkwhisper-large-v1` |
 | 2 · 30/07 | `reworkwhisper-large-v3_training-curve.png` | `reworkwhisper-large-v3_lambda-tradeoff.png` | `reworkwhisper-large-v3-0.5lamda` |
 | 3 · 04/08 | `Reworkwhisper-large-v4_training-curve.png` | `Reworkwhisper-large-v4_lambda-tradeoff.png` | `Reworkwhisper-large-v4` |
-| 4 · 17/08 | `v4-mixed-r16_training-curve.png` | `v4-mixed-r16_lambda-tradeoff.png` + `v4-mixed-r16_lambda-by-lambda.png` | chưa publish |
+| 4 · 17/08 | `v4-mixed-r16_training-curve.png` | `v4-mixed-r16_lambda-tradeoff.png` + `v4-mixed-r16_lambda-by-lambda.png` | `Reworkwhisper-large-v5` (λ=0,75) |
 
 Ảnh của lần 1 và 2 copy từ `D:\phowhisper-finetune-exp\outputs\<run>\`. Ảnh của lần 3 và 4 sinh bằng
 `scripts/plot_training_curve.py` và `scripts/plot_lambda_tradeoff.py`.
 
 **5 ảnh của lần 1–3 đã nhúng vào `docs/finetune-slides.html`** (deck 18 slide), mỗi ảnh kèm chú
 thích rút từ file này. Đường dẫn ảnh trong slide là tương đối (`training-curves/*.png`) nên phải
-giữ nguyên vị trí thư mục này cạnh file HTML. **3 ảnh của lần 4 chưa vào deck** — hiện chỉ nhúng
-trong `docs/finetune-results-report-v4-mixed-r16.md`.
+giữ nguyên vị trí thư mục này cạnh file HTML. **3 ảnh của lần 4 chưa vào deck, và hiện không báo
+cáo nào nhúng chúng**: `docs/finetune-results-report-v4-mixed-r16.md` từng nhúng, nhưng file đó đã
+được rút gọn thành `docs/finetune-results-report-v4.md` và bản rút gọn không có ảnh.
 
 Tên file ảnh gắn với **model xuất bản** của lần đó cho dễ tìm, nhưng nội dung mọi curve là **λ=1.0**
 — xem mục dưới.
@@ -171,7 +173,7 @@ Cùng grid `[0, 0.25, 0.5, 0.75, 1.0]` và cùng ngân sách **+2.0pp** như l�
 **âm**; ngưỡng `prev_ratio × 10` vì thế cũng âm (−0.046) và bước 0.25→0.5 (0.193) vượt ngưỡng
 ngay. λ=0.5 bị loại không phải vì nó là khuỷu thật — khuỷu thật nằm ở 0.5→0.75, nơi tỉ số nhảy
 từ 0.193 lên 2.26. Cần chặn `prev_ratio` ở một mức dương tối thiểu; chi tiết trong
-`docs/finetune-results-report-v4-mixed-r16.md` §4.
+`docs/finetune-results-report-v4.md` §3.
 
 Ghi chú về màu: vạch ngân sách OOD đổi từ đỏ `#c9435b` sang tím `#8e44ad` (2026-08-17), vì run
 này thêm đường `val youtube` **cũng** màu đỏ đứt nét — trùng cả màu lẫn kiểu nét, đọc ra thành
