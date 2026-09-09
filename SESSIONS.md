@@ -779,3 +779,63 @@ tier4a). Trục thật có thể gần cơ chế phát âm/đánh vần hơn là
 liệu mới (nghe lại audio, không chỉ đọc text) để xác nhận, chưa làm ở đây. **Không đủ cơ sở để chọn
 D2 qua D3 chỉ từ kết quả này** — trục đề xuất ban đầu không đứng vững, hệ quả kéo theo ("D2 nhắm
 đúng loại từ, D3 không") ở đoạn phía trên **không còn hiệu lực**.
+
+---
+
+## 2026-08-19 — Đo cổng kiểm bằng đúng module 4 của production
+
+**Trục thứ ba của sự cố v5 được nêu và dựng cơ chế: đường decode.** §2.1 sửa "so sai đối tượng",
+§2.4 sửa "chỉ số không bắt được lỗi", nhưng cả hai vẫn đo bằng `src/asr.py:transcribe_batch` —
+greedy, cắt cứng 30 s, fp16, chấm từng segment rời — trong khi module 4 của `d:\viet-speech` decode
+với thang temperature `(0.0 … 1.0)`, `condition_on_prev_tokens=True`, long-form `truncation=False`,
+fp32. Đó là hai thuật toán khác nhau, nên CER cổng **không chặn được** CER production, và
+`check_no_regression_vs_production` đang xếp hạng hai model trên một đường decode không model nào
+chạy khi phục vụ người dùng. Chi tiết: `docs/kiem-diem-v5-production-regression.md` §2.7.
+
+**Không viết lại module 4 — chép nguyên văn.** Kế hoạch ban đầu là gọi HTTP tới
+`d:\viet-speech\scripts\remote_asr_server.py`, nhưng repo đó private nên máy GPU không pull được.
+`vendor/viet_speech/` giữ bản sao **byte-identical** của 9 file (4 file decode + 4 `__init__.py` +
+server), chạy được bằng `python vendor/viet_speech/remote_asr_server.py`. Kiểm chứng đáng ghi:
+`backend/adapters/asr/phowhisper.py` và `remote_asr_server.py` **trùng sha256 với đúng entry trong
+`viet-speech-remote.zip`** — tức bản chép là chính xác code máy GPU đang chạy, không phải "gần
+đúng". Hai file đó có thay đổi chưa commit so với `9795707`; phần chênh chỉ thêm `transcribe_batch`
+và tách hàm, **không đổi tham số decode nào**. Ghi đầy đủ trong `vendor/viet_speech/VENDORED.md`.
+
+**Fine_tune_wf vẫn không cần torch.** Phía local chỉ ghép audio, gọi HTTP, chấm điểm. Chấm bằng
+`Normalizer` của repo này chứ không phải `normalize_vi` của viet-speech (bản kia không có quy ước
+số — dùng nó sẽ thêm một trục lệch nữa vào phép đo sinh ra để cô lập một trục).
+
+**Đã build và test:**
+
+| File | Việc |
+|---|---|
+| `vendor/viet_speech/` | 9 file chép nguyên văn + `VENDORED.md` (nguồn, commit, sha256 từng file, profile decode) |
+| `scripts/eval_module4.py` | 2 split, một clip một POST, `gen_params: null`; ghi `predictions_*.csv` đúng 4 cột của `write_predictions`, `hyp_raw_*.csv`, `module4_results.json`, `responses_*.jsonl` (resume được) |
+| `tests/test_module4_profile.py` | 13 test: hash 9 file so với `d:\viet-speech`, assert từng default decode, assert `_gen_kwargs` không override, assert bảng hash trong `VENDORED.md` còn đúng |
+| `scripts/merge_and_push.py` | `--module4-dir` + `--module4-production-dir` **bắt buộc**; `check_module4_evidence` chạy CER + retention trên **cả hai split**. `check_no_regression_vs_production` không đổi một dòng — chỉ tách phần join ra `_shared_segments` để `check_retention_vs_production` dùng chung |
+
+**Xác minh đã chạy được ở máy này (không cần GPU):**
+
+- `build_real_clips`: **196 parent segment, 43,2 phút**, clip dài nhất **212,0 s** — đúng con số kế
+  hoạch. Số chunk mỗi parent: 1–10.
+- **Ref trùng từng byte với `rejoin_real_chunks` của cổng trên cả 196 parent** (so với
+  `Outputs/lambda075-metrics/v4-mixed-r16-lambda0.75/audit/predictions_tier4a_real.csv`, 0 lệch).
+  Đây là điều kiện để bước verify 4 có nghĩa: cùng tập, cùng tham chiếu, chỉ khác đường decode.
+- `build_test_clips`: **654 segment (426 synthetic + 228 youtube), 94,95 phút**, phân giải qua 2
+  root không copy audio. Lưu ý đã bắt được: audio `paid-dataset-v2` là **24 kHz**, nên phải qua
+  `load_audio_16k` — gửi thẳng 24 kHz thì server đọc sample rate từ header WAV và feature extractor
+  sẽ tạo mel sai.
+- Chạy đủ đường bằng server giả (cùng shape request/response, không weights): POST → resume jsonl →
+  CSV → JSON đều đúng; `--expect-model-id` sai thì raise; `--probe-determinism` chạy.
+- `pytest tests/` — **189 pass**.
+
+**Chưa chạy: bộ bằng chứng thật.** Cần máy GPU, ~4,6 h (138 phút audio × 2 model, fp32 large
+long-form, RTF ước ~1). Thứ tự: real-bench trước cho cả hai model (~1,5 h), vì triệu chứng
+production nằm ở đó và `--probe-determinism` phải trả lời trước khi tiêu 3 h còn lại — nếu thang
+temperature bind thì mỗi split phải chạy nhiều lượt và báo cả độ tán. **Cho tới lúc đó, độ lệch
+giữa cổng và production vẫn là con số chưa ai biết**; con số cổng để đối chiếu là tier4a
+**0,2440** và tier1 **0,0422** (synthetic 0,0161 / youtube 0,0593) của v4-mixed-r16@λ=0,75.
+
+**Phần dư có ý thức:** production chạy đủ 8 module nên module 4 nhận splice đã tách nguồn + trim im
+lặng, còn bằng chứng này dùng audio real-bench thô. Đây là bằng chứng về *đường decode*, không phải
+về toàn pipeline — ghi ra để không bị đọc thành bao phủ nhiều hơn thực tế.
