@@ -19,11 +19,21 @@ differences, both deliberate:
 The HF token is read from the environment (HF_TOKEN), never from config, never
 written into the model card.
 
+Since 2026-08-19 the push is gated on module-4 evidence (`--module4-dir` /
+`--module4-production-dir`, both required): the candidate must beat production on
+CER and not lose English tokens, on both splits, measured through the decode path
+that ships (`scripts/eval_module4.py`) rather than the eval gate's. Every other
+check above is on gate-path numbers, which is fine for the ones that are about the
+adapter's provenance -- but a candidate-vs-production ranking taken on a decode
+neither model runs in service is not a ranking of what users will get.
+
     python -m scripts.merge_and_push \
         --run-dir experiments/v4-mixed-r16-lambda0.75 \
         --adapter /kaggle/input/.../lambda075-adapter \
         --repo-id winhsss/Reworkwhisper-large-v5 \
         --out /kaggle/working/merged-v4-mixed-r16-lambda0.75 \
+        --module4-dir Outputs/module4-parity/v4-mixed-r16-lambda0.75 \
+        --module4-production-dir Outputs/module4-parity/v3-r16-lambda0.5 \
         --production-predictions experiments/v3-r16-lambda0.5/predictions_tier1_in_domain.csv \
         --confirm
 
@@ -87,21 +97,12 @@ def check_provenance(cfg: dict, gate: dict, sweep: list[dict], adapter: str) -> 
     return lam
 
 
-def check_no_regression_vs_production(candidate_csv: Path, production_csv: Path) -> tuple[float, float, int]:
-    """The check the gate never runs (SESSIONS.md H4): every tier compares a
-    candidate only against its own base-model baseline, never against whatever
-    is already serving production -- so two runs 51% apart on CER (v3-r16 vs
-    v4-mixed-r16, measured on 426 shared synthetic segments) can both
-    `overall_pass`. Joins `candidate_csv`/`production_csv` (both
-    `audit/predictions_tier1_in_domain.csv`) on (meeting_id, segment_id) and
-    raises if the candidate regresses on the segments both actually scored.
-
-    Raises if a shared key's `ref` differs between the two files (comparing
-    against the wrong segments, not the same test set) or if the candidate's
-    CER on the shared segments is worse than production's."""
+def _shared_segments(candidate_csv: Path, production_csv: Path):
+    """The (candidate, production, shared_keys) join both production checks below
+    run on. Raises if the two files share no segment, or if a shared key's `ref`
+    differs between them -- that is two different test sets, and any number
+    computed across them describes neither."""
     import csv as csv_module
-
-    from src.metrics import score
 
     def _load(path: Path) -> dict[tuple[str, str], dict]:
         with open(path, encoding="utf-8") as f:
@@ -119,6 +120,26 @@ def check_no_regression_vs_production(candidate_csv: Path, production_csv: Path)
             raise RuntimeError(
                 f"segment {key} has different `ref` text between {candidate_csv} and "
                 f"{production_csv} -- these are not the same test segments.")
+    return candidate, production, shared
+
+
+def check_no_regression_vs_production(candidate_csv: Path, production_csv: Path) -> tuple[float, float, int]:
+    """The check the gate never runs (SESSIONS.md H4): every tier compares a
+    candidate only against its own base-model baseline, never against whatever
+    is already serving production -- so two runs 51% apart on CER (v3-r16 vs
+    v4-mixed-r16, measured on 426 shared synthetic segments) can both
+    `overall_pass`. Joins `candidate_csv`/`production_csv` on
+    (meeting_id, segment_id) and raises if the candidate regresses on the
+    segments both actually scored.
+
+    Both files must be predictions from the SAME decode path, and since 2026-08-19
+    `main()` feeds it module-4 predictions (`scripts/eval_module4.py`) rather than
+    gate ones: comparing two models on `src/asr.py`'s greedy 30s-truncated path
+    ranks them on a decode neither runs when serving users. The function is
+    unchanged -- only what is loaded into it is."""
+    from src.metrics import score
+
+    candidate, production, shared = _shared_segments(candidate_csv, production_csv)
 
     cand_cer = score([candidate[k]["ref"] for k in shared], [candidate[k]["hyp"] for k in shared])["cer"]
     prod_cer = score([production[k]["ref"] for k in shared], [production[k]["hyp"] for k in shared])["cer"]
@@ -129,6 +150,74 @@ def check_no_regression_vs_production(candidate_csv: Path, production_csv: Path)
             f"candidate regresses vs production on {len(shared)} shared segments: "
             f"cer {cand_cer:.4f} > production's {prod_cer:.4f} -- refusing to push.")
     return cand_cer, prod_cer, len(shared)
+
+
+def check_retention_vs_production(candidate_csv: Path, production_csv: Path,
+                                   max_regression_pp: float) -> tuple[float, float, int]:
+    """English-token retention must not fall behind production's by more than
+    `max_regression_pp` absolute points on the shared segments.
+
+    CER cannot stand in for this: substituting `team` -> `tim` costs two edit
+    characters in a segment of hundreds, which lands inside the bootstrap
+    interval, so a candidate can lose most of its loanwords and still show a
+    better CER (measured: v4-mixed-r16 dropped 10.4pp of retention on the
+    synthetic slice while passing every tier). `src/gate.py` already applies this
+    rule per source slice against a base-model baseline; this applies it against
+    the model actually serving production, on production's own decode path.
+
+    Slices with no English-shaped reference tokens return retention None on
+    either side -- there is nothing to lose, so the check is skipped rather than
+    failed."""
+    from src.metrics import english_token_retention
+
+    candidate, production, shared = _shared_segments(candidate_csv, production_csv)
+    keys = sorted(shared)
+    cand = english_token_retention([candidate[k]["ref"] for k in keys],
+                                    [candidate[k]["hyp"] for k in keys])
+    prod = english_token_retention([production[k]["ref"] for k in keys],
+                                    [production[k]["hyp"] for k in keys])
+    if cand["retention"] is None or prod["retention"] is None:
+        print(f"retention check skipped: no English-shaped reference tokens in "
+              f"{len(shared)} shared segments")
+        return cand["retention"], prod["retention"], len(shared)
+
+    print(f"retention check: candidate {cand['retention']:.4f} vs production "
+          f"{prod['retention']:.4f} over {cand['n_candidates']} candidate tokens in "
+          f"{len(shared)} shared segments")
+    if cand["retention"] < prod["retention"] - max_regression_pp / 100:
+        lost = dict(list(cand["missing"].items())[:10])
+        raise RuntimeError(
+            f"candidate loses English tokens vs production: retention "
+            f"{cand['retention']:.4f} < {prod['retention']:.4f} - "
+            f"{max_regression_pp}pp -- refusing to push. Most-missed: {lost}")
+    return cand["retention"], prod["retention"], len(shared)
+
+
+def check_module4_evidence(candidate_dir: Path, production_dir: Path,
+                            max_retention_regression_pp: float) -> None:
+    """Both production checks, on both splits, using module-4 predictions.
+
+    This is the gate that decides a push, so it runs on the decode path that will
+    ship (`scripts/eval_module4.py`, `vendor/viet_speech/`), not on the eval
+    gate's. Both splits, because the two answer different questions: tier 1 is the
+    in-domain test set the run was selected on, tier 4a is real recorded meetings
+    at long-form -- which is where the v5 production regression was reported and
+    where the gate's 30s truncation makes its measurement least like production's.
+
+    Every file must be present. A missing split is not "nothing to check" -- it is
+    a split nobody measured, and this function exists precisely because unmeasured
+    things were being assumed."""
+    for split, tier in (("real", "tier4a_real"), ("test", "tier1_in_domain")):
+        cand = candidate_dir / f"predictions_{tier}.csv"
+        prod = production_dir / f"predictions_{tier}.csv"
+        for path in (cand, prod):
+            if not path.exists():
+                raise RuntimeError(
+                    f"{path} not found -- run `python -m scripts.eval_module4 --split "
+                    f"{split}` against that model before pushing.")
+        print(f"-- module 4, {split} split ({tier})")
+        check_no_regression_vs_production(cand, prod)
+        check_retention_vs_production(cand, prod, max_retention_regression_pp)
 
 
 def merge(base_model: str, adapter: str, tol: float):
@@ -241,7 +330,15 @@ def main() -> None:
     ap.add_argument("--production-predictions",
                     help="audit/predictions_tier1_in_domain.csv from the run currently serving "
                     "production; if given, raise before merging if this candidate regresses "
-                    "against it on shared (meeting_id, segment_id) segments (SESSIONS.md H4)")
+                    "against it on shared (meeting_id, segment_id) segments (SESSIONS.md H4). "
+                    "Gate-decode-path evidence -- diagnostic now that --module4-dir decides")
+    ap.add_argument("--module4-dir", required=True,
+                    help="REQUIRED: this candidate's Outputs/module4-parity/<label>, from "
+                         "`python -m scripts.eval_module4`. Both splits' predictions must be "
+                         "there. This is the evidence the push is gated on -- it is the only "
+                         "measurement taken on the decode path the model will actually serve")
+    ap.add_argument("--module4-production-dir", required=True,
+                    help="REQUIRED: the same, for the model currently serving production")
     ap.add_argument("--delete-remote-adapter", action="store_true",
                     help=f"after a successful upload, delete {' + '.join(ADAPTER_FILES)} from the repo")
     ap.add_argument("--confirm", action="store_true", help="required: without it, nothing is pushed")
@@ -263,7 +360,15 @@ def main() -> None:
         candidate_csv = run_dir / "audit" / "predictions_tier1_in_domain.csv"
         if not candidate_csv.exists():
             raise RuntimeError(f"{candidate_csv} not found -- cannot compare against production")
+        print("-- gate decode path (src/asr.py), diagnostic only")
         check_no_regression_vs_production(candidate_csv, Path(args.production_predictions))
+
+    # Older runs' config.json predates gates.max_retention_regression_pp (added
+    # 2026-08-16), so fall back to the field's own default rather than failing on a
+    # run that was written before the field existed.
+    max_retention_pp = cfg.get("gates", {}).get("max_retention_regression_pp", 0.0)
+    check_module4_evidence(Path(args.module4_dir), Path(args.module4_production_dir),
+                            max_retention_pp)
 
     merged, processor = merge(cfg["base_model"], args.adapter, args.tol)
 
