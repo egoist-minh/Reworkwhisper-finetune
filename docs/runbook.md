@@ -465,3 +465,60 @@ run trước truy về chuẩn hoá chữ số, không phải học âm học. �
 
 **Trước khi trích một caveat về dataset:** các cảnh báo trong `CLAUDE.md` có thể chỉ đúng
 cho một version (v1 vs v2). Kiểm manifest của chính run đó, đừng trích từ trí nhớ.
+
+---
+
+# Phần E — Bảng benchmark nhiều mô hình
+
+Đo nhiều mô hình trên nhiều bộ benchmark rồi ra một bảng CER/WER. Tách hẳn khỏi pipeline
+fine-tune: không train, không gate, không đụng `configs/experiment.yaml`.
+
+Bốn file, hai giai đoạn:
+
+| File | Vai trò |
+|---|---|
+| `scripts/benchmark_suites.py` | Đăng ký bộ benchmark. Thêm bộ mới = thêm một dòng `SUITE_SPECS` |
+| `scripts/benchmark_run.py` | Giải mã (GPU hoặc API), ghi hypothesis **thô**, resume theo `segment_id` |
+| `scripts/benchmark_report.py` | Chấm điểm trên CPU từ file đã ghi. Chạy lại bao nhiêu lần cũng được |
+| `notebooks/benchmark-matrix.ipynb` | Runner Kaggle. Sinh lại bằng `python scripts/_make_benchmark_notebook.py` |
+
+Sáu bộ có sẵn: `vimedcss-test`, `vimedcss-hard` (tải từ Hub), `youtube-test`,
+`synthetic-test` (cùng trỏ vào `mixed-noisy-v1`), `vivos`, `cross-domain`.
+
+## E1. Giải mã
+
+```bash
+# mô hình local, GPU
+python -m scripts.benchmark_run --backend hf --model vinai/PhoWhisper-large     --suites vimedcss-test,youtube-test,synthetic-test,vivos,cross-domain     --path youtube-test=/kaggle/working/dataset/mixed-noisy-v1     --path synthetic-test=/kaggle/working/dataset/mixed-noisy-v1     --path vivos=dataset/vivos     --path cross-domain=/kaggle/input/datasets/<user>/cross-domain-bench/cross-domain-bench     --out Outputs/benchmark-<ngày> --batch-size 8
+
+# API trả phí — luôn probe 1 đoạn trước
+python -m scripts.benchmark_run --backend elevenlabs --model scribe_v2     --suites cross-domain --path cross-domain=<dir> --out /tmp/_probe --limit 1
+```
+
+Ghi ra `<out>/<model_slug>.<suite>.persegment.jsonl` (hypothesis thô, chưa chuẩn hoá) và
+`<...>.failures.jsonl`. 🔴 Đoạn nào giải mã hỏng thì ghi vào file failures và **bị loại
+khỏi mọi cột** lúc chấm — không có chuyện một cột nhiều đoạn hơn cột kia.
+
+Cổng kiểm: `--limit 8` chạy khô toàn bộ trước khi bỏ giờ GPU hoặc tiền API vào.
+
+## E2. Chấm điểm
+
+```bash
+python -m scripts.benchmark_report --dir Outputs/benchmark-<ngày>     --variant N3 --baseline vinai_phowhisper_large
+```
+
+`N3` = chuẩn hoá mặc định của repo, cùng thang với mọi số trong `docs/so-lieu-tong-hop.md`.
+`N0` = biến thể thô đã dựng lại được dòng base Bảng 4 của ViMedCSS; **so với bài báo phải
+dùng N0**. Hai biến thể là hai lần chạy, không bao giờ trộn trong một bảng.
+
+Ghi ra `benchmark-table.<variant>.md` và `scores.json` (có CI bootstrap, paired bootstrap
+so với `--baseline`, và danh sách đoạn bị loại).
+
+## E3. Đừng trả tiền / đốt GPU hai lần
+
+- Resume theo `segment_id`: phiên chết ở 80% thì lần chạy sau chỉ làm 20% còn lại.
+- ViMedCSS đã giải mã sẵn cho base + v5 (`Outputs/vimedcss_output/`, 2026-09-09, cùng
+  đường decode). Copy 4 file `.persegment.jsonl` vào thư mục run và đổi tên
+  `<model>.test` → `<model>.vimedcss-test` là tiết kiệm ~4,2 giờ T4. Cell 8 của notebook
+  làm sẵn việc này.
+- 🔴 **Không so ngang giữa các cột.** Sáu bộ, sáu độ khó. Chỉ đọc dọc.

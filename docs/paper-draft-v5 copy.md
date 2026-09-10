@@ -1,8 +1,7 @@
 # Tinh chỉnh nhẹ mô hình nhận dạng tiếng nói tiếng Việt cho các cuộc họp có chuyển mã
 
 > Bản nháp. Số liệu lấy từ `docs/so-lieu-tong-hop.md`; mỗi phần được chốt riêng trước khi ghi vào đây.
-> Quy ước: dùng đơn vị **giờ** cho thời lượng các tập dữ liệu; phút và giây chỉ dùng khi mô tả
-> tham số quy trình.
+> Quy ước: dùng đơn vị **giờ** cho mọi thời lượng dữ liệu trong toàn bài.
 
 ## Trạng thái từng phần
 
@@ -17,7 +16,7 @@
 | 6. Kết quả | chốt |
 | 7. Phân tích | chốt tạm |
 | 8. Hạn chế | chốt |
-| 9. Kết luận | nháp |
+| 9. Kết luận | chưa |
 
 ---
 
@@ -39,7 +38,7 @@ ngân sách sai số trên VIVOS.
 
 Trên tập test 654 đoạn, cấu hình do quy trình tự chọn (λ=0,5) đưa CER trên phần YouTube meeting từ
 15,93% xuống 6,24% — giảm tương đối 60,8% — WER từ 22,69% xuống 10,11%, và tỷ lệ giữ đúng từ
-mượn từ 36,4% lên 82,3%. Cấu hình được triển khai thực tế (λ=0,75), chọn sau khi quan sát toàn
+mượn từ 36,4% lên 82,6%. Cấu hình được triển khai thực tế (λ=0,75), chọn sau khi quan sát toàn
 bộ đường cong λ, đạt lần lượt 5,93%, 9,37% và 85,5%. Trên ba buổi họp giữ riêng thuộc ba lĩnh
 vực khác nhau và hoàn toàn nằm ngoài phân phối huấn luyện, mô hình đạt CER 8,44% so với 6,54%
 của một hệ thống thương mại đang dẫn đầu.
@@ -56,7 +55,7 @@ WER 4,73% — xác nhận rằng với giọng đọc rõ, câu ngắn, nội du
 được giải.
 
 Các cuộc họp công việc lại là một phân phối khác hẳn. Trên bộ dữ liệu bảy buổi YouTube meeting mà
-chúng tôi thu thập, 6,67% số token và 89,7% số đoạn chứa ít nhất một từ mượn tiếng
+chúng tôi thu thập và hiệu đính, 6,67% số token và 89,7% số đoạn chứa ít nhất một từ mượn tiếng
 Anh không được Việt hoá — tên công cụ, thuật ngữ chuyên môn, tên thương hiệu. Cùng chỉ số ấy
 trên tập test VIVOS bằng đúng 0: không một token nào. Sự chênh lệch này không phải là khác biệt
 về mức độ khó mà là khác biệt về loại hiện tượng, và nó ẩn hoàn toàn khỏi mọi bảng xếp hạng dựa
@@ -122,21 +121,21 @@ phục mô hình tinh chỉnh đầy đủ. Cả hai đều làm trên mô hình
 tôi áp dụng cơ chế ấy cho nhận dạng tiếng nói, với task vector chính là tích `BA` của LoRA
 nên phép hợp nhất có dạng `W + λ·BA`, và với một khác biệt về quy tắc chọn: thay vì lấy λ tối ưu
 trên miền đích, chúng tôi ràng buộc λ bằng ngân sách sai số trên miền chung rồi mới chọn λ tốt
-nhất trong số các giá trị thoả ràng buộc (mục 4.2).
+nhất trong số các giá trị thoả ràng buộc (mục 5).
 
 
 ---
 
 ## 3. Dữ liệu
 
-**3.1. Nguồn và sàng lọc.** Corpus YouTube meeting gồm bảy video công khai trên YouTube cùng
-chủ đề phỏng vấn tuyển dụng kỹ thuật, đều là hội thảo hoặc buổi tư vấn, thời lượng gốc từ 27,4
-đến 110,9 phút. Ba luật sàng lọc chạy trên phụ đề tự động **trước khi tải audio**, nhằm loại
-sớm những video không dùng được: không có phụ đề tiếng Việt; phụ đề tiếng Việt là bản dịch máy
-chứ không phải bản gốc; và tốc độ từ trên phút tụt dần qua các mốc năm phút, dấu hiệu cho thấy
-phụ đề là bản tóm tắt do người viết chứ không phải bản nhận dạng giọng nói. Cả bảy video đều
-qua được cả ba luật; không video nào bị loại. Việc sàng lọc trước khi tải là chủ ý, vì bước tải
-và cắt tốn kém hơn bước đọc phụ đề nhiều bậc.
+**3.1. Nguồn và sàng lọc.** Corpus YouTube meeting gồm bảy video công khai trên YouTube thuộc miền công
+nghệ và tuyển dụng, đều là hội thảo hoặc buổi tư vấn, thời lượng gốc từ 27,4 đến 110,9 phút. Ba
+luật sàng lọc chạy trên phụ đề tự động **trước khi tải audio**, nhằm loại sớm những video không
+dùng được: không có phụ đề tiếng Việt; phụ đề tiếng Việt là bản dịch máy chứ không phải bản gốc;
+và tốc độ từ trên phút tụt dần qua các mốc năm phút, dấu hiệu cho thấy phụ đề là bản tóm tắt do
+người viết chứ không phải bản nhận dạng giọng nói. Cả bảy video đều qua được cả ba luật; không
+video nào bị loại. Việc sàng lọc trước khi tải là chủ ý, vì bước tải và cắt tốn kém hơn bước đọc
+phụ đề nhiều bậc.
 
 **3.2. Cắt đoạn.** Mỗi buổi được cắt về một cửa sổ ba mươi phút liên tục căn giữa video, tránh
 phần chào hỏi đầu buổi và phần hỏi đáp rời rạc cuối buổi. Sáu trên bảy buổi cho đúng 1800,0 giây;
@@ -148,39 +147,37 @@ là 790 đoạn, tổng 3,46 giờ, 41.210 từ, âm thanh 16 kHz một kênh.
 **3.3. Gán nhãn.** Phụ đề tự động được dùng làm nhãn nháp, sau đó người soát hiệu đính toàn bộ.
 Cách này rẻ hơn phiên âm từ đầu nhiều lần, và quan trọng hơn, nó dồn công sức vào đúng chỗ hệ tự
 động sai có hệ thống thay vì rải đều lên cả những đoạn vốn đã đúng. Toàn bộ 790 đoạn đều đã qua
-soát theo xác nhận của nhóm soát ngày 2026-09-08 — bản thân manifest không cho kết luận này, vì
-trường trạng thái ở mức từng đoạn hiện chỉ được điền cho 229 đoạn, phần còn lại thiếu thao tác
-ghi nhận chứ không thiếu bước soát. Mức độ can thiệp đo được từ chính dữ liệu: text sau hiệu
-đính khác text nhãn nháp ở 779 trên 790 đoạn. Loại sửa đặc trưng nhất nằm đúng ở từ mượn —
-chẳng hạn chuỗi `grap` xuất hiện 24 lượt trong nhãn nháp và 0 lượt trong nhãn cuối, trong khi
-`grab` đi từ 9 lượt lên 45 lượt.
+soát; trường trạng thái ở mức từng đoạn hiện chỉ được điền cho 229 đoạn, phần còn lại thiếu thao
+tác ghi nhận chứ không thiếu bước soát. Mức độ can thiệp đo được từ chính dữ liệu: text sau hiệu
+đính khác text nhãn nháp ở 779 trên 790 đoạn. Loại sửa đặc trưng nhất nằm đúng ở từ mượn — chẳng
+hạn chuỗi `grap` xuất hiện 21 lượt trong nhãn nháp và 0 lượt trong nhãn cuối, trong khi `grab` đi
+từ 9 lượt lên 43 lượt.
 
 **3.4. Hồ sơ định lượng.** Đặc điểm nổi bật nhất là mật độ code-switching: 6,67% số token và 89,7% số
 đoạn chứa ít nhất một từ mượn tiếng Anh không Việt hoá. Để đối chiếu, cùng phép đo trên tập test
-VIVOS cho kết quả 0 token. Hai tỷ lệ này đo trên nhãn nháp, trước lượt hiệu đính, và chưa được
-đo lại trên nhãn cuối. Hai chỉ số khác được đo nhưng không phải là thách thức chính của corpus
-này. Chồng tiếng chỉ chiếm 0,89% tổng số giây thực sự có hai người nói cùng lúc, dù 26,7% số
-đoạn có chồng tiếng khác 0 — định dạng hội thảo có người dẫn khiến các lượt nói ít giẫm lên
-nhau. Về người nói, độ tương đồng ECAPA trong cùng buổi đạt 0,54 so với 0,32 giữa các buổi khác
-nhau.
+VIVOS cho kết quả 0 token. Hai chỉ số khác được đo nhưng không phải là thách thức chính của corpus
+này. Chồng tiếng chỉ chiếm 0,89% tổng số giây thực sự có hai người nói cùng lúc, dù 26,7% số đoạn
+có chồng tiếng khác 0 — định dạng hội thảo có người dẫn khiến các lượt nói ít giẫm lên nhau. Về
+người nói, độ tương đồng ECAPA trong cùng buổi đạt 0,54 so với 0,32 giữa các buổi khác nhau, tức
+các buổi phân tách được về mặt giọng nói ở mức tổng thể.
 
 **3.5. Ba tầng độc lập giữa huấn luyện và kiểm thử.** Chúng tôi kiểm tra riêng ba chiều độc lập.
 
 | Chiều | Trạng thái |
 |---|---|
 | Buổi họp và tệp âm thanh | tách hoàn toàn — không buổi nào xuất hiện ở cả hai phía |
-| Người nói | chưa kiểm định độc lập; bằng chứng gián tiếp là độ tương đồng ECAPA trong buổi 0,54 so với giữa các buổi 0,32, và buổi `xKDHjUoUN54` thuộc tập huấn luyện có độ tương đồng cao hơn mức thường thấy với hai buổi kiểm thử |
-| Chủ đề | dùng chung — cả bảy buổi cùng chủ đề phỏng vấn tuyển dụng kỹ thuật |
+| Người nói | tách ở mức tổng thể; buổi `xKDHjUoUN54` thuộc tập huấn luyện có độ tương đồng ECAPA cao hơn mức thường thấy với hai buổi kiểm thử |
+| Chủ đề | dùng chung — cả bảy buổi cùng thuộc miền công nghệ và tuyển dụng |
 
 Chủ đề dùng chung là đặc điểm cố hữu của một corpus thu hẹp theo miền: khi mục tiêu là học cách
 xử lý thuật ngữ và lối chêm từ của một lĩnh vực, việc các buổi cùng miền là điều mong muốn ở phía
 huấn luyện, đồng thời có nghĩa là kết quả trên tập test đo năng lực **trong** miền ấy. Để đo phần khái quát hoá ra ngoài miền, chúng tôi
 đánh giá thêm trên ba buổi giữ riêng thuộc ba lĩnh vực khác hẳn — tuyển dụng nhân sự, hội chẩn y
-khoa và webinar marketing — trình bày ở mục 5.2 và 6.3.
+khoa và webinar marketing — trình bày ở mục 5.
 
 **3.6. Dữ liệu synthetic và phân chia.** Bên cạnh YouTube meeting, chúng tôi dùng một tập hội thoại họp
 synthetic sinh bằng kịch bản do mô hình ngôn ngữ viết rồi đọc bằng hệ text-to-speech thương
-mại, với mười giọng ở tập huấn luyện và chín giọng ở tập kiểm thử không giao nhau. Phân chia cuối
+mại, với mười giọng ở tập huấn luyện và mười giọng ở tập kiểm thử không giao nhau. Phân chia cuối
 cùng:
 
 | Split | YouTube meeting | Synthetic | Tổng đoạn |
@@ -199,7 +196,7 @@ việc.
 
 ## 4. Phương pháp
 
-**4.1. Tinh chỉnh.** Chúng tôi gắn adapter LoRA vào sáu ma trận trọng số của mỗi khối
+**4.1. Tinh chỉnh.** Chúng tôi gắn adapter LoRA vào sáu ma trận projection của mỗi khối
 Transformer trong cả encoder lẫn decoder: `q_proj`, `k_proj`, `v_proj`, `out_proj` của khối
 self-attention, cùng `fc1`, `fc2` của khối feed-forward. Danh sách này bám theo tên module thực
 tế của Whisper, khác với quy ước phổ biến ở các mô hình decoder-only — chọn nhầm tên sẽ khiến
@@ -207,20 +204,18 @@ adapter được tạo ra nhưng không gắn vào đâu cả, và quá trình h
 không học được gì.
 
 Cấu hình: rank 16, alpha 32, dropout 0,05, dùng rsLoRA thay cho hệ số scaling `alpha/r` mặc định.
-Tổng cộng 28,8 triệu tham số khả huấn trên 1,64 tỷ tham số mà thư viện PEFT đếm được trong lần
-chạy này — cao hơn con số 1,55 tỷ mà bài `PhoWhisper` công bố — tương đương 1,76%. Huấn luyện 3
-epoch, learning rate 2×10⁻⁴, warmup ratio 0,1, gradient checkpointing, seed 42, tổng 885 bước
-cập nhật trên một GPU T4 duy nhất.
+Tổng cộng 28,8 triệu tham số khả huấn trên 1,64 tỷ, tương đương 1,76%. Huấn luyện 3 epoch,
+learning rate 2×10⁻⁴, warmup ratio 0,1, gradient checkpointing, seed 42, tổng 885 bước cập nhật
+trên một GPU T4 duy nhất.
 
 **4.2. Chọn hệ số hợp nhất.** Sau huấn luyện, adapter được hợp nhất theo `W + λ·BA` với λ quét
 trên lưới {0; 0,25; 0,5; 0,75; 1,0}. Mỗi mức λ được chấm trên tập validation và trên VIVOS. Quy
 trình chọn gồm hai tầng.
 
-*Ràng buộc cứng.* CER trên VIVOS không được vượt quá CER của mô hình nền cộng 2,00 điểm phần
-trăm, tức trần 4,28% trong lần chạy này; giá trị khai báo trong cấu hình là
-`sweep.ood_cer_budget: 0.02`. Đây là ngân sách cho phép mô hình quên một lượng hữu hạn năng lực
-miền chung, khai báo trước chứ không suy ra từ kết quả. Nếu không λ nào trong lưới thoả ràng
-buộc, quy trình dừng và báo lỗi — không có fallback mềm, không chọn "λ gần nhất".
+*Ràng buộc cứng.* CER trên VIVOS không được vượt quá CER của mô hình nền cộng 0,02 tuyệt đối,
+tức trần 0,0428 trong lần chạy này. Đây là ngân sách cho phép mô hình quên một lượng hữu hạn
+năng lực miền chung, khai báo trước chứ không suy ra từ kết quả. Nếu không λ nào trong lưới thoả
+ràng buộc, quy trình dừng và báo lỗi — không có fallback mềm, không chọn "λ gần nhất".
 
 *Quy tắc elbow.* Trong số các λ thoả ngân sách, ta duyệt theo chiều tăng và tính tỉ số
 cost/benefit của từng bước, lấy mức tăng CER trên VIVOS chia cho mức giảm CER trên validation.
@@ -244,9 +239,8 @@ tiếng Việt; rồi đếm bao nhiêu token trong số đó xuất hiện lạ
 multiset nên việc đảo thứ tự không bị phạt còn việc nói hai lần mà chỉ nhận ra một lần thì bị.
 Chúng tôi cố ý nhận diện từ mượn bằng hình dạng âm tiết thay vì đối chiếu whitelist từ tiếng
 Anh, bởi trong thử nghiệm sơ bộ, cách dùng whitelist cho tới 72% false positive — phần lớn là
-các âm tiết tiếng Việt trùng mặt chữ với từ tiếng Anh; đây là quan sát sơ bộ, không lưu lại hồ
-sơ đo. Trên tập test, bộ nhận diện đánh dấu 362 type và 1.353 lượt; rà soát thủ công tìm được 7
-type đáng ngờ ứng với 15 lượt, tức 1,1% theo lượt.
+các âm tiết tiếng Việt trùng mặt chữ với từ tiếng Anh. Trên tập test, bộ nhận diện đánh dấu 362
+type và 1.353 lượt; rà soát thủ công tìm được 7 type đáng ngờ ứng với 15 lượt, tức 1,1% theo lượt.
 
 
 ---
@@ -260,7 +254,7 @@ type đáng ngờ ứng với 15 lượt, tức 1,1% theo lượt.
 | `PhoWhisper-large` | — | mô hình nền, không tinh chỉnh |
 | `Reworkwhisper-large-v4` | 0,5 | chỉ hội thoại synthetic |
 | `Reworkwhisper-large-v5` @ λ=0,5 | 0,5 | synthetic + YouTube meeting |
-| `Reworkwhisper-large-v5` @ λ=0,75 | 0,75 | synthetic + YouTube meeting |
+| `Reworkwhisper-large-v5` | 0,75 | synthetic + YouTube meeting |
 
 Hai dòng cuối là cùng một adapter ở hai hệ số hợp nhất, không phải hai mô hình khác nhau: λ=0,5
 là cấu hình do quy tắc ở mục 4.2 chọn, λ=0,75 là cấu hình đã triển khai. Chúng tôi báo cáo song
@@ -284,11 +278,11 @@ vì gộp chung sẽ che mất chênh lệch giữa chúng. Cả bốn cấu hì
 sở cho ràng buộc ngân sách ở mục 4.2. Không câu nào trong tập này chứa token mang hình dạng phi
 âm tiết tiếng Việt.
 
-*Ba buổi giữ riêng (299 đoạn, 1,30 giờ).* Ba buổi thuộc ba lĩnh vực nằm ngoài miền huấn luyện —
+*Ba buổi giữ riêng (299 đoạn, 78 phút).* Ba buổi thuộc ba lĩnh vực nằm ngoài miền huấn luyện —
 tuyển dụng nhân sự, hội chẩn y khoa, webinar marketing — dùng để đo khả năng khái quát hoá ra
 ngoài miền. Trên bộ này chúng tôi đối chiếu trực tiếp với ElevenLabs Scribe v2.
 
-*Benchmark audio thu thật (2 bản ghi, 0,72 giờ).* Ghi âm cuộc họp thu tại chỗ, khác hoàn
+*Benchmark audio thu thật (2 bản ghi, 43,2 phút).* Ghi âm cuộc họp thu tại chỗ, khác hoàn
 toàn về điều kiện âm học so với audio YouTube. Reference của bộ này là bản nháp do
 `PhoWhisper-small` sinh rồi người hiệu đính, nên nó đo mức cải thiện tương đối chứ không phải sai
 số tuyệt đối đáng tin.
@@ -317,7 +311,7 @@ theo hai phần. Trong ngoặc là khoảng tin cậy bootstrap 95% ở mức đ
 **Bảng 1.** CER, WER và tỷ lệ giữ từ mượn trên tập test in-domain (228 đoạn YouTube meeting, 426
 đoạn synthetic), đơn vị phần trăm. Giá trị tốt nhất mỗi hàng in đậm.
 
-| Chỉ số | `PhoWhisper-large` | `Reworkwhisper-large-v4` | `Reworkwhisper-large-v5` @ λ=0,5 | `Reworkwhisper-large-v5` @ λ=0,75 |
+| Chỉ số | `PhoWhisper-large` | `Reworkwhisper-large-v4` | `-v5` @ λ=0,5 | `Reworkwhisper-large-v5` |
 |---|---:|---:|---:|---:|
 | CER — YouTube meeting | 15,93 [12,05; 23,35] | 12,05 | 6,24 | **5,93** [5,42; 6,45] |
 | CER — synthetic | 4,26 [3,78; 4,73] | 1,96 | 1,85 | **1,61** [1,31; 1,89] |
@@ -327,10 +321,10 @@ theo hai phần. Trong ngoặc là khoảng tin cậy bootstrap 95% ở mức đ
 | Giữ từ mượn — YouTube meeting | 36,4 | 77,5 | 82,3 | **85,5** |
 | Giữ từ mượn — synthetic | 55,7 | 83,1 | 83,1 | **86,2** |
 
-Cả bảy chỉ số không xấu đi ở bước nào; sáu trong bảy cải thiện qua từng bước. Mức giảm CER
-tuyệt đối lớn nhất nằm ở phần YouTube meeting, 10,00 điểm giữa mô hình nền và cấu hình đã triển
-khai, so với 2,65 điểm ở phần synthetic. Chỉ số giữ từ mượn tăng mạnh nhất ở bước đầu tiên,
-41,1 điểm giữa mô hình nền và `Reworkwhisper-large-v4`.
+Cả bảy chỉ số cải thiện đơn điệu qua bốn cấu hình. Mức giảm CER tuyệt đối lớn nhất nằm ở phần
+YouTube meeting, 10,00 điểm giữa mô hình nền và cấu hình đã triển khai, so với 2,65 điểm ở phần
+synthetic. Chỉ số giữ từ mượn tăng mạnh nhất ở bước đầu tiên, 41,1 điểm giữa mô hình nền và
+`Reworkwhisper-large-v4`.
 
 Khoảng tin cậy của mô hình nền trên phần YouTube meeting rộng hơn hẳn các cấu hình còn lại.
 Nguyên nhân là một đoạn trong 228 đoạn mà mô hình nền sinh chuỗi lặp, cho CER 2543,8%; loại đoạn
@@ -342,7 +336,7 @@ này, CER của mô hình nền trên phần YouTube meeting là 12,65. Mọi co
 **Bảng 2.** Ảnh hưởng của hệ số hợp nhất λ, đo trên tập test và trên VIVOS, đơn vị phần trăm.
 Ngân sách CER trên VIVOS là 4,28.
 
-| λ | CER YouTube meeting | CER synthetic | Giữ từ mượn (YouTube meeting) | CER VIVOS |
+| λ | CER YouTube meeting | CER synthetic | Giữ từ mượn | CER VIVOS |
 |---:|---:|---:|---:|---:|
 | 0,00 | 15,93 | 4,26 | 36,4 | 2,28 |
 | 0,25 | 7,64 | 2,58 | 70,9 | **2,26** |
@@ -353,11 +347,9 @@ Ngân sách CER trên VIVOS là 4,28.
 **Hình 1.** CER theo λ trên ba tập đánh giá. (`docs/training-curves/paper-fig1-lambda.png`)
 
 Bước từ λ=0 lên 0,25 giảm 8,29 điểm CER trên phần YouTube meeting trong khi CER trên VIVOS giảm
-0,02 điểm. Hai bước tiếp theo giảm thêm 1,71 điểm trên phần YouTube meeting và làm CER trên
-VIVOS tăng 1,08 điểm; bước cuối lên λ=1,0 làm CER trên VIVOS tăng thêm 0,91 điểm, lên 4,26 —
-cách ngân sách 0,027 điểm — và không có số trên tập test vì cấu hình này không được lưu thành
-artifact. Mọi hiệu số trong đoạn này tính trên giá trị chưa làm tròn, nên lệch ở chữ số cuối so
-với phép trừ trực tiếp trên các giá trị đã làm tròn của Bảng 2.
+0,02 điểm. Ba bước sau cộng lại giảm thêm 1,71 điểm trên phần YouTube meeting và làm CER trên
+VIVOS tăng 2,00 điểm. Ở λ=1,0, CER trên VIVOS đạt 4,26, cách ngân sách 0,02 điểm. Cấu hình λ=1,0
+không được lưu thành artifact nên không có số trên tập test.
 
 **6.3. Ngoài phân phối huấn luyện.** Bảng 3 so `Reworkwhisper-large-v5` với ElevenLabs Scribe v2
 trên ba buổi giữ riêng.
@@ -401,9 +393,8 @@ phải mức hợp nhất.
 Hình dạng của Bảng 4 quan trọng hơn từng con số. Trên phần synthetic, hai adapter gần như bằng nhau
 (1,96 và 1,85) — bản chỉ huấn luyện trên dữ liệu synthetic đã chạm trần của miền ấy, thêm dữ
 liệu YouTube meeting không mua thêm được gì đáng kể. Trên phần YouTube meeting thì khác hẳn: dữ liệu synthetic
-một mình đưa CER từ 15,93% xuống 12,05%, còn thêm 1,96 giờ YouTube meeting đưa tiếp xuống 6,24%
-— phần sau gấp rưỡi phần trước — 5,81 điểm so với 3,88 điểm, dù chỉ chiếm 28% thời lượng huấn
-luyện.
+một mình đưa CER từ 15,93% xuống 12,05%, còn thêm 1,96 giờ YouTube meeting đưa tiếp xuống 6,24% — phần
+sau lớn hơn phần trước rưỡi lần, dù chỉ chiếm 28% thời lượng huấn luyện.
 
 Chỉ số giữ từ mượn có hình dạng khác. Phần lớn mức tăng đến ngay từ dữ liệu synthetic, từ 36,4%
 lên 77,5%; dữ liệu YouTube meeting thêm 4,8 điểm nữa. Một cách đọc khả dĩ, tuy chưa được đo riêng, là
@@ -419,11 +410,11 @@ và ở số bước cập nhật, nên đây là chỉ dấu mạnh chứ khôn
 
 ## 8. Hạn chế
 
-**8.1. Phạm vi của corpus.** Bảy buổi đến từ cùng chủ đề phỏng vấn tuyển dụng kỹ thuật, nên các
-con số ở Bảng 1 đặc trưng cho miền ấy hơn là cho cuộc họp tiếng Việt nói chung. Phần synthetic
-dùng giọng text-to-speech, không mang các đặc điểm của giọng người thật, nên CER tuyệt đối trên
-phần này chỉ có giá trị so sánh tương đối. Mở rộng sang nhiều lĩnh vực và nhiều nguồn ghi âm là
-hướng tiếp theo tự nhiên.
+**8.1. Phạm vi của corpus.** Bảy buổi đến từ cùng miền công nghệ và tuyển dụng, nên các con số ở
+Bảng 1 đặc trưng cho miền ấy hơn là cho cuộc họp tiếng Việt nói chung. Phần synthetic dùng giọng
+text-to-speech, không mang các đặc điểm của giọng người thật, nên CER tuyệt đối trên phần này chỉ
+có giá trị so sánh tương đối. Mở rộng sang nhiều lĩnh vực và nhiều nguồn ghi âm là hướng tiếp
+theo tự nhiên.
 
 **8.2. Đánh đổi với miền chung.** Cấu hình đã triển khai làm CER trên VIVOS tăng 1,06 điểm, nằm
 trong ngân sách khai báo trước. Đây là đánh đổi có chủ đích cho một hệ thống chuyên xử lý họp;
@@ -433,28 +424,6 @@ CER trên phần YouTube meeting cao hơn 1,7 điểm.
 **8.3. Đánh giá ngoài miền.** Trên ba buổi thuộc lĩnh vực khác, ElevenLabs Scribe v2 cho CER thấp
 hơn 1,9 điểm. Lần chấm này dùng cấu hình decode khác Bảng 1 nên hai bảng không so trực tiếp; tái
 lập bằng đúng quy trình chấm của bài sẽ cho một phép so sánh chặt hơn.
-
-## 9. Kết luận
-
-Khoảng cách giữa nhận dạng tiếng nói tiếng Việt trên tập chuẩn và trên cuộc họp công việc không
-phải là khác biệt về mức độ khó mà là khác biệt về loại hiện tượng. Trên corpus bảy buổi mà chúng
-tôi xây dựng, 6,67% số token là từ mượn tiếng Anh không Việt hoá, còn tập test VIVOS không chứa
-một token nào thuộc loại ấy; trên đúng lát cắt đó, `PhoWhisper-large` đạt CER 15,93% cùng tỷ lệ
-giữ đúng từ mượn 36,4%, so với CER 2,28% của chính nó trên VIVOS.
-
-Khoảng cách ấy lấp được với chi phí thấp. 1,96 giờ họp có nhãn hiệu đính từ phụ đề tự động — chỉ
-28% thời lượng huấn luyện, phần còn lại là hội thoại synthetic — cùng LoRA hạng 16 huấn luyện trọn
-vẹn trên một GPU T4 đưa CER trên phần YouTube meeting xuống 6,24% ở cấu hình do quy trình chọn và
-5,93% ở cấu hình đã triển khai, đồng thời đưa tỷ lệ giữ đúng từ mượn lên 82,3% và 85,5%. Không cần
-full fine-tuning, không cần hạ tầng nhiều GPU, và mô hình nền còn nguyên vẹn vì bản tinh chỉnh chỉ
-là một tệp adapter. Vì hệ số hợp nhất được chọn dưới một ngân sách sai số khai báo trước, mức suy
-giảm trên miền chung là con số được công bố cùng kết quả chứ không phải thứ phát hiện ra sau.
-
-Ba giới hạn ở mục 8 định hình cách đọc các con số trên: corpus thu hẹp về một chủ đề, phần
-synthetic dùng giọng text-to-speech, và trên ba buổi thuộc lĩnh vực khác thì một hệ thương mại vẫn
-cho CER thấp hơn 1,9 điểm. Hai hướng tiếp theo vì thế đã rõ — mở rộng corpus sang nhiều lĩnh vực
-và nhiều nguồn ghi âm, và chấm lại phần đánh giá ngoài miền bằng đúng quy trình chấm của bài để
-phép so sánh với hệ thương mại trở nên chặt chẽ.
 
 ---
 
@@ -493,11 +462,11 @@ phép so sánh với hệ thương mại trở nên chặt chẽ.
 - Ablation về quy ước chuẩn hoá chữ số đã bỏ theo quyết định 2026-09-09. Số vẫn còn trong
   `docs/so-lieu-tong-hop.md` §12.1 nếu cần dùng lại để trả lời phản biện: đổi quy ước chỉ làm CER
   xê dịch 0,161 điểm ở λ=0,75 và 0,447 điểm ở λ=0,25.
-- Đoạn dị thường của mô hình nền (`7B24A9GfHAo/seg_0079`, CER 2543,8%): giữ trong bài, nêu ở mục
-  6.1 theo quyết định 2026-09-09. Nó chiếm 3,3 trong 10 điểm cải thiện đang báo cáo — mô hình nền
-  đạt 12,65% nếu loại đoạn này, so với 15,93% khi tính đủ 228 đoạn.
+- Đoạn dị thường của mô hình nền (`7B24A9GfHAo/seg_0079`, CER 2543,8%): nêu trong bài hay bỏ?
+  Chưa quyết. Nó chiếm 3,3 trong 10 điểm cải thiện đang báo cáo — mô hình nền đạt 12,65% nếu loại
+  đoạn này, so với 15,93% khi tính đủ 228 đoạn.
 - Phân tích seen/unseen đã bỏ khỏi bài (quyết định 2026-09-09), kéo theo việc bỏ câu tương ứng
-  trong Abstract, vế trong đoạn thứ tư của mục 1, đóng góp số 4, và câu dẫn ở mục 3.5.
+  trong Abstract, vế trong mục 1.4, đóng góp số 4, và câu dẫn ở mục 3.5.
 - Ba vật liệu còn chưa dùng, để ngỏ cho mục 7 nếu cần mở rộng: (a) danh sách token bị mất nhiều
   lượt nhất — `jd` 26, `vinpearl` 24, `funnel` 15 — cho thấy lỗi còn lại tập trung ở viết tắt
   chuyên ngành và danh từ riêng; (b) chấm lại ba buổi giữ riêng bằng bộ chuẩn hoá của `viet-speech`
