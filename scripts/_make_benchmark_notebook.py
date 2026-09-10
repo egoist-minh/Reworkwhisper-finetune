@@ -38,8 +38,11 @@ path appears.** Cell 2 clones from GitHub `main`, so commit and push before runn
 3. Add Data — attach these Kaggle Datasets:
    - `paid-dataset-v2` and `youtube-meetings` (merged into `mixed-noisy-v1` by cell 6;
      this is where `youtube-test` and `synthetic-test` come from)
-   - `cross-domain-bench` — upload `dataset/youtube-data-pilot-package/` from this repo
-     (`manifest.*.jsonl` + `audio/`, 3 meetings / 299 segments / 78 min)
+   - `cross-domain-bench` — build the upload with
+     `python -m scripts.zip_for_kaggle --src dataset/youtube-data-pilot-package --out
+     cross-domain-bench.zip` (3 meetings / 299 segments / 78 min). Do NOT zip it with a
+     Windows tool: a backslash separator inside the archive extracts as one flat file
+     named `IGZYBrbDUEw\seg_0000.wav` and every audio path then misses.
    VIVOS is fetched from the Hub by cell 7; ViMedCSS is streamed from the Hub.
 
 ## Cost, and how not to pay it twice

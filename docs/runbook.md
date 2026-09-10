@@ -485,6 +485,20 @@ Bốn file, hai giai đoạn:
 Sáu bộ có sẵn: `vimedcss-test`, `vimedcss-hard` (tải từ Hub), `youtube-test`,
 `synthetic-test` (cùng trỏ vào `mixed-noisy-v1`), `vivos`, `cross-domain`.
 
+## E0. Đóng gói corpus để upload lên Kaggle
+
+```bash
+python -m scripts.zip_for_kaggle --src dataset/youtube-data-pilot-package     --out Outputs/cross-domain-bench.zip
+```
+
+Chỉ lấy `manifest.*.jsonl` + `audio/`. 🔴 **Không dùng `Compress-Archive` hay chuột phải
+→ Send to → Compressed folder trên Windows.** Công cụ zip Windows đã từng ghi tên entry
+bằng `\` thay vì `/`; giải nén trên Kaggle ra **một** file phẳng tên
+`IGZYBrbDUEw\seg_0000.wav`, và lỗi chỉ lộ ra hàng giờ sau, giữa lúc giải mã. Script này
+ghi `/` tường minh rồi mở lại archive kiểm tra, từ chối nếu còn `\`.
+
+Kỳ vọng cho `cross-domain-bench`: 302 entry (3 manifest + 299 wav), ~125 MB.
+
 ## E1. Giải mã
 
 ```bash

@@ -32,13 +32,21 @@ def load_for_eval(base_model: str, adapter_dir: str | Path | None = None):
     from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
     dtype = pick_dtype()
-    # use_safetensors=False doesn't stop transformers' safetensors auto-conversion
-    # probe thread from firing (403 on repos with discussions disabled, e.g.
-    # PhoWhisper-*) -- the traceback it used to dump is silenced by
-    # compat.silence_hf_discussions_403_noise(). Callers must run compat.apply()
-    # before this (see src/compat.py, src/lora.py).
-    model = WhisperForConditionalGeneration.from_pretrained(
-        base_model, torch_dtype=dtype, use_safetensors=False)
+    # Default load first. `use_safetensors=False` used to be passed unconditionally
+    # to dodge transformers' safetensors auto-conversion probe (403 on repos with
+    # discussions disabled, e.g. PhoWhisper-*), but it does not stop that probe --
+    # TRANSFORMERS_AUTO_CONVERSION=0 plus compat.silence_hf_discussions_403_noise()
+    # do, and callers must run compat.apply() before this (src/compat.py,
+    # src/lora.py). What the flag DID do is hide safetensors from transformers, so a
+    # safetensors-only repo raised `does not appear to have a file named
+    # pytorch_model.bin or model.safetensors` -- how winhsss/Reworkwhisper-large-v5
+    # failed on 2026-09-09. Kept only as a fallback for a .bin-only repo that the
+    # default path somehow refuses.
+    try:
+        model = WhisperForConditionalGeneration.from_pretrained(base_model, torch_dtype=dtype)
+    except OSError:
+        model = WhisperForConditionalGeneration.from_pretrained(
+            base_model, torch_dtype=dtype, use_safetensors=False)
     processor = WhisperProcessor.from_pretrained(base_model)
 
     if adapter_dir is not None:

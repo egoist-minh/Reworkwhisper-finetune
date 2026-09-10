@@ -105,9 +105,30 @@ def chunk_audio(audio: np.ndarray, max_sec: float = 30.0) -> list[np.ndarray]:
     return [audio[i:i + n] for i in range(0, len(audio), n)]
 
 
+def _diagnose_missing(name: str, path: Path) -> str:
+    """`Path.glob` on a directory that does not exist returns empty rather than
+    raising, so "no manifest.*.jsonl under X" cannot tell a wrong mount path from a
+    corpus zipped one level too deep. This says which one it is."""
+    if not path.exists():
+        parent = path.parent
+        siblings = sorted(p.name for p in parent.iterdir()) if parent.is_dir() else []
+        return (f"suite {name}: {path} does not exist. "
+                + (f"{parent} contains: {siblings}" if siblings
+                   else f"{parent} does not exist either -- re-run `ls -la /kaggle/input`"))
+    nested = sorted({m.parent for m in path.rglob("manifest.*.jsonl")})
+    if nested:
+        return (f"suite {name}: no manifest.*.jsonl at the root of {path}, but found "
+                f"some one or more levels down. Point --path {name}= at: {nested[0]}")
+    entries = sorted(p.name for p in path.iterdir())[:20]
+    return (f"suite {name}: {path} exists but holds no manifest.*.jsonl anywhere. "
+            f"It contains: {entries}")
+
+
 def _load_manifest_suite(name: str, spec: dict, path: Path) -> list[Segment]:
     from src.data import load_manifests
 
+    if not sorted(path.glob("manifest.*.jsonl")):
+        raise FileNotFoundError(_diagnose_missing(name, path))
     records = load_manifests(path)
     for key, want in spec["filter"].items():
         records = [r for r in records if r.get(key) == want]

@@ -115,7 +115,11 @@ class ElevenLabsBackend:
         for attempt in range(self.retries):
             resp = self.requests.post(
                 ELEVENLABS_URL, headers={"xi-api-key": self.key}, data=payload,
-                files={"file": (f"{seg.segment_id}.wav", seg.wav_bytes(), "audio/wav")},
+                # `segment_id` is `<meeting_id>/seg_NNNN`; a slash in a multipart
+                # filename is mangled or rejected by some servers, so flatten it here.
+                # The stored row keeps the real segment_id -- only the upload name changes.
+                files={"file": (seg.segment_id.replace("/", "_") + ".wav",
+                                seg.wav_bytes(), "audio/wav")},
                 timeout=180)
             if resp.status_code == 200:
                 body = resp.json()
