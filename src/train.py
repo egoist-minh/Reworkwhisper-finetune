@@ -30,11 +30,15 @@ HF's internal key shape, and saves `checkpoints/best/` itself the moment
 best-model bookkeeping.
 """
 
+import inspect
+import math
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
+from src.asr import pick_dtype
 from src.metrics import score
 from src.normalize import Normalizer
 
@@ -110,6 +114,17 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
     from src.lora import build_lora_config
 
     out = Path(out_dir)
+    train_dtype = pick_dtype() if torch.cuda.is_available() else torch.float32
+    # transformers 5.17 dropped warmup_ratio and kept only warmup_steps. Feature-detect
+    # rather than branch on a version string (src/compat.py), so an older transformers
+    # keeps taking the ratio it understands.
+    if "warmup_ratio" in inspect.signature(Seq2SeqTrainingArguments.__init__).parameters:
+        warmup_kwargs = {"warmup_ratio": cfg.training.warmup_ratio}
+    else:
+        steps_per_epoch = math.ceil(
+            len(train_ds) / (cfg.training.batch_size * cfg.training.grad_accum_steps))
+        total_steps = math.ceil(steps_per_epoch * cfg.training.epochs)
+        warmup_kwargs = {"warmup_steps": round(cfg.training.warmup_ratio * total_steps)}
     processor = WhisperProcessor.from_pretrained(cfg.base_model)
     model = get_peft_model(base_model, build_lora_config(cfg))
     model.print_trainable_parameters()
@@ -133,10 +148,19 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
         per_device_eval_batch_size=cfg.eval.batch_size,
         gradient_accumulation_steps=cfg.training.grad_accum_steps,
         learning_rate=cfg.training.learning_rate,
-        warmup_ratio=cfg.training.warmup_ratio,
+        **warmup_kwargs,
         num_train_epochs=cfg.training.epochs,
         gradient_checkpointing=cfg.training.gradient_checkpointing,
-        fp16=torch.cuda.is_available(),
+        # Same capability rule as src/asr.py:pick_dtype, so training and eval run the
+        # same numeric type on the same GPU. Hardcoding fp16 here put a Hopper/Ampere
+        # run in fp16 while load_for_eval loaded bf16.
+        fp16=train_dtype is torch.float16,
+        bf16=train_dtype is torch.bfloat16,
+        # ManifestDataset.__getitem__ decodes a wav and resamples 24k -> 16k per item
+        # (src/data.py), and the collator extracts mel on top of that. HF's default of
+        # 0 workers runs all of it in the training process, which starves any GPU
+        # faster than the T4 this was first measured on.
+        dataloader_num_workers=min(8, os.cpu_count() or 1),
         predict_with_generate=True,
         generation_num_beams=cfg.eval.num_beams,
         eval_strategy="epoch",

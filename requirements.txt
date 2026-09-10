@@ -11,7 +11,12 @@ soundfile
 pyarrow            # VIVOS refs/convert/parquet branch
 huggingface_hub
 torch
-transformers
+# Pinned 2026-09-10 on the H200 box: 5.17.0 forwards **kwargs from
+# WhisperForConditionalGeneration.forward down into WhisperDecoder, where peft's
+# SEQ_2_SEQ_LM wrapper's own input_ids=None collides with decoder_input_ids
+# ("got multiple values for keyword argument 'input_ids'") and training dies on step 1.
+# 5.0.0 is what the v3-r16 / v4-mixed-r16 runs used.
+transformers==5.0.0
 peft
 accelerate         # transitive via Trainer, pinned here so it is visible
 
