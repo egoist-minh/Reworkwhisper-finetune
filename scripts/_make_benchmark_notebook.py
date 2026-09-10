@@ -57,9 +57,9 @@ path appears.** Cell 2 clones from GitHub `main`, so commit and push before runn
 | `cross-domain` | 299 | 1.30 h | ~0.4 h |
 
 Two GPU models over everything is ~6.6 h — inside one 12 h session, but it eats a fifth
-of the weekly free-tier quota. **Cell 8 imports the ViMedCSS decodes this project already
-has** (`Outputs/vimedcss_output/`, 2026-09-09) and saves ~4.2 h of that. Skip cell 8 only
-if you want a from-scratch ViMedCSS run.
+of the weekly free-tier quota. The ViMedCSS cell defaults to `REUSE_VIMEDCSS = False`, so
+both splits are decoded fresh in this run. Set it to `True` to import the 2026-09-09
+decodes from `Outputs/vimedcss_output/` instead and spend ~4.2 h less.
 
 ElevenLabs is billed by audio hour (~$0.22/h): the full matrix is ~8.4 h ≈ **$1.9**.
 Every backend resumes by `segment_id`, so an interrupted session never re-decodes — and
@@ -152,7 +152,7 @@ EL_MODEL   = "scribe_v2"                # ElevenLabs model_id; cell 12 probes it
 # --- suite -> directory. Edit the two /kaggle/input paths to match cell 5's listing. ---
 MIXED_PATH  = "/kaggle/working/dataset/mixed-noisy-v1"                       # written by cell 6
 VIVOS_PATH  = "/kaggle/working/Reworkwhisper-finetune/dataset/vivos"          # written by cell 7
-CROSS_PATH  = "/kaggle/input/datasets/winhkento/cross-domain-bench/cross-domain-bench"
+CROSS_PATH  = "/kaggle/input/datasets/winhkento/cross-domain-bench"   # confirmed 2026-09-10: this one is NOT doubled
 
 PATHS = (f"--path youtube-test={MIXED_PATH} "
          f"--path synthetic-test={MIXED_PATH} "
@@ -207,7 +207,7 @@ those two suites for those two models because every segment_id is already presen
 code(r"""
 import shutil
 
-REUSE_VIMEDCSS = True     # False -> decode ViMedCSS from scratch in this session
+REUSE_VIMEDCSS = False    # True -> reuse the 2026-09-09 decodes instead (~4.2 T4 hours cheaper)
 
 # The stored files are named `<model>.<split>`; this harness keys suites `vimedcss-<split>`.
 RENAME = {
@@ -229,7 +229,18 @@ if REUSE_VIMEDCSS:
             shutil.copyfile(s, d)
             print(f"copied  {d.name} ({sum(1 for _ in d.open(encoding='utf-8'))} rows)")
 else:
-    print("REUSE_VIMEDCSS = False -- ViMedCSS will be decoded in this session")
+    stale = sorted(Path(OUT_DIR).glob("*.vimedcss-*.persegment.jsonl"))
+    print("REUSE_VIMEDCSS = False -- ViMedCSS is decoded fresh in this session "
+          "(~4.2 T4 hours for two models over both splits)")
+    if stale:
+        # Resume matches on segment_id, so leftovers from an earlier session would be
+        # kept and only the gaps re-decoded -- not a fresh run. Say so; deleting a
+        # decode is the operator's call, not this cell's.
+        print(f"\n{len(stale)} ViMedCSS file(s) ALREADY in {OUT_DIR}:")
+        for f in stale:
+            print(f"  {f.name} ({sum(1 for _ in f.open(encoding='utf-8'))} rows)")
+        print("Resume will keep these. For a genuinely fresh decode, delete them first:")
+        print(f"  !rm {OUT_DIR}/*.vimedcss-*.persegment.jsonl")
 """)
 
 md("""

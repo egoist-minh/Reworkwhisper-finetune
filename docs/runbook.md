@@ -532,7 +532,9 @@ so với `--baseline`, và danh sách đoạn bị loại).
 
 - Resume theo `segment_id`: phiên chết ở 80% thì lần chạy sau chỉ làm 20% còn lại.
 - ViMedCSS đã giải mã sẵn cho base + v5 (`Outputs/vimedcss_output/`, 2026-09-09, cùng
-  đường decode). Copy 4 file `.persegment.jsonl` vào thư mục run và đổi tên
-  `<model>.test` → `<model>.vimedcss-test` là tiết kiệm ~4,2 giờ T4. Cell 8 của notebook
-  làm sẵn việc này.
+  đường decode, đã track trong git). Cell `REUSE_VIMEDCSS` của notebook copy 4 file
+  `.persegment.jsonl` vào thư mục run và đổi tên `<model>.test` → `<model>.vimedcss-test`,
+  tiết kiệm ~4,2 giờ T4. Mặc định `False` — đo lại từ đầu; đặt `True` để dùng lại.
+- Hypothesis đã trả tiền cho API nằm ở `Outputs/benchmark-2026-09-10/`, track bằng
+  `git add -f` vì `Outputs/` bị gitignore. Cell ngay sau đó copy chúng vào thư mục run.
 - 🔴 **Không so ngang giữa các cột.** Sáu bộ, sáu độ khó. Chỉ đọc dọc.
