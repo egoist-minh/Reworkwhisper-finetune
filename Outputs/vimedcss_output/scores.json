@@ -1,0 +1,88 @@
+{
+  "dataset": "tensorxt/ViMedCSS",
+  "scoring_variant": "N0 raw",
+  "g1_reproduced": true,
+  "decode": {
+    "num_beams": 1,
+    "language": "vi",
+    "batch_size": 8,
+    "max_chunk_sec": 30.0,
+    "no_repeat_ngram_size": 0
+  },
+  "paper_table4": {
+    "test": {
+      "vinai/PhoWhisper-large": {
+        "wer": 31.24,
+        "cer": 19.25
+      }
+    },
+    "hard": {}
+  },
+  "results": {
+    "vinai/PhoWhisper-large|test": {
+      "n_segments": 1612,
+      "cer": 0.1846408053281814,
+      "wer": 0.3159584295612009,
+      "cer_ci": [
+        0.17786878174778367,
+        0.19188112854454875
+      ],
+      "retention": 0.18640576725025745,
+      "n_candidates": 1942
+    },
+    "winhsss/Reworkwhisper-large-v5|test": {
+      "n_segments": 1612,
+      "cer": 0.15655091768773197,
+      "wer": 0.25653579676674365,
+      "cer_ci": [
+        0.15048980432957876,
+        0.16284076827757124
+      ],
+      "retention": 0.29351184346035014,
+      "n_candidates": 1942
+    },
+    "vinai/PhoWhisper-large|hard": {
+      "n_segments": 658,
+      "cer": 0.22654890245486428,
+      "wer": 0.36795432458697763,
+      "cer_ci": [
+        0.20725268498725113,
+        0.25412742897368806
+      ],
+      "retention": 0.2772373540856031,
+      "n_candidates": 1028
+    },
+    "winhsss/Reworkwhisper-large-v5|hard": {
+      "n_segments": 658,
+      "cer": 0.18247824392778283,
+      "wer": 0.2981049562682216,
+      "cer_ci": [
+        0.17171691781768825,
+        0.19547914258694968
+      ],
+      "retention": 0.3754863813229572,
+      "n_candidates": 1028
+    }
+  },
+  "g2_paired_improved": {
+    "test": true,
+    "hard": true
+  },
+  "undecodable": {
+    "test": {
+      "Med_CS-4072_1-13": "length mismatch: decoded 0.0s vs manifest 4.0s",
+      "Med_CS-4072_1-18": "length mismatch: decoded 1.0s vs manifest 7.0s"
+    },
+    "hard": {}
+  },
+  "excluded_single_model": {
+    "test": {
+      "vinai/PhoWhisper-large": [],
+      "winhsss/Reworkwhisper-large-v5": []
+    },
+    "hard": {
+      "vinai/PhoWhisper-large": [],
+      "winhsss/Reworkwhisper-large-v5": []
+    }
+  }
+}

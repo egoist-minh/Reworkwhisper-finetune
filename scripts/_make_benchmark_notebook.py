@@ -233,6 +233,28 @@ else:
 """)
 
 md("""
+### Hypotheses already paid for
+
+`Outputs/benchmark-2026-09-10/` holds decodes tracked in git precisely because they cost
+money or GPU hours and `/kaggle/working` does not survive the session. Copying them in
+makes the runs below skip those segments.
+""")
+
+code(r"""
+import shutil          # re-imported: this cell must work even if cell 14 was skipped
+
+PAID_DIR = "Outputs/benchmark-2026-09-10"
+
+for src in sorted(Path(PAID_DIR).glob("*.persegment.jsonl")):
+    dst = Path(OUT_DIR) / src.name
+    if dst.exists():
+        print(f"kept   {dst.name} (already in the run dir)")
+    else:
+        shutil.copyfile(src, dst)
+        print(f"copied {dst.name} ({sum(1 for _ in dst.open(encoding='utf-8'))} rows)")
+""")
+
+md("""
 ## 6. Decode — baseline, then the candidate
 
 Two separate cells, one model each: a Kaggle session that dies between them keeps the
@@ -295,14 +317,22 @@ code(r"""
     --backend elevenlabs --model {EL_MODEL} \
     --suites cross-domain {PATHS} \
     --out /kaggle/working/_el_probe --limit 1
+# `--limit 1` is what makes this a probe. Removing it sends the WHOLE suite to the
+# paid API -- that is how 299 cross-domain segments got billed on 2026-09-10.
 !cat /kaggle/working/_el_probe/*.persegment.jsonl
 """)
 
 code(r"""
-# FULL PAID RUN (~8.4 h of audio ≈ $1.9 at $0.22/h). Drop suites from --suites to spend less.
+# ONE SUITE PER RUN. Not GPU_SUITES: a free-tier key runs out of credit mid-way, and a
+# half-decoded suite narrows the shared segment set for EVERY model on that suite,
+# not just this one. Finish a suite, save it, then change this line.
+#   youtube-test 1.00 h -> synthetic-test 0.58 h -> cross-domain 1.30 h (done)
+#   -> vivos 0.75 h -> vimedcss-test 3.38 h -> vimedcss-hard 1.38 h
+EL_SUITE = "youtube-test"
+
 !python -m scripts.benchmark_run \
     --backend elevenlabs --model {EL_MODEL} \
-    --suites {GPU_SUITES} {PATHS} \
+    --suites {EL_SUITE} {PATHS} \
     --out {OUT_DIR} {LIMIT}
 """)
 
