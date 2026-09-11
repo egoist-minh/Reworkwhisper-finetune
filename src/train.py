@@ -33,6 +33,7 @@ best-model bookkeeping.
 import inspect
 import math
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -181,6 +182,32 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
         remove_unused_columns=False,
     )
 
+    class StepTimingCallback(TrainerCallback):
+        """Per-step wall clock, split into compute and the gap before the next step.
+
+        The gap is where a slow dataloader shows up. Trainer pulls the batch off
+        the iterator before on_step_begin fires, so whatever elapses between one
+        on_step_end and the next on_step_begin is mostly waiting on audio to be
+        decoded and resampled. That wait is the part that grows with the corpus
+        -- 100 h is ~14 GB of 24 kHz wavs read once per epoch, against the ~100 MB
+        that stays in page cache on a short probe -- and train_runtime cannot
+        separate it from compute.
+        """
+
+        def __init__(self):
+            self.begins: list[float] = []
+            self.ends: list[float] = []
+
+        def on_step_begin(self, args, state, control, **kwargs):
+            self.begins.append(time.perf_counter())
+            return control
+
+        def on_step_end(self, args, state, control, **kwargs):
+            self.ends.append(time.perf_counter())
+            return control
+
+    step_timing = StepTimingCallback()
+
     stopping = _EarlyStoppingState(patience=3, greater_is_better=False)
     best_dir = out / "checkpoints" / "best"
 
@@ -283,12 +310,13 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
         eval_dataset={"val": val_ds, "ood": ood_ds},
         data_collator=WhisperCollator(processor),
         compute_metrics=_make_compute_metrics(processor, normalizer),
-        callbacks=[RobustEvalTrackingCallback(), TrainingDisplayCallback()],
+        callbacks=[RobustEvalTrackingCallback(), TrainingDisplayCallback(),
+                   step_timing],
     )
     # disable_tqdm=True makes Trainer default-add PrinterCallback, which dumps every
     # log event as a raw dict -- that's the noise TrainingDisplayCallback replaces.
     trainer.remove_callback(PrinterCallback)
-    trainer.train()
+    result = trainer.train()
 
     if stopping.best is None:
         raise RuntimeError(
@@ -299,6 +327,14 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
         )
 
     _write_training_csv(trainer.state.log_history, out / "metrics" / "training.csv")
+    _write_timing_json(
+        result.metrics,
+        trainer.state.log_history,
+        trainer.state.global_step,
+        step_timing.begins,
+        step_timing.ends,
+        out / "metrics" / "timing.json",
+    )
     return best_dir
 
 
@@ -313,4 +349,136 @@ def _write_training_csv(log_history: list[dict], out_path: Path) -> Path:
         writer.writeheader()
         for row in log_history:
             writer.writerow({k: row.get(k, "") for k in fields})
+    return out_path
+
+
+def _summarize_step_times(begins: list[float], ends: list[float], warmup: int = 10) -> dict | None:
+    """Steady-state per-step cost, warmup excluded.
+
+    The opening steps of a run pay for cuDNN autotune, allocator growth and the
+    first touch of every weight, so a mean taken over all of them inflates any
+    projection built on it. Returns None when the run is too short to have a
+    steady state at all -- better than a number nobody can tell is warmup.
+
+    Three series, because they answer different questions: `compute` is
+    on_step_begin to on_step_end, `dataloader_gap` is the wait before the next
+    step begins, and `cycle` is begin-to-begin, which is the one to multiply by
+    a step count when projecting a longer run.
+    """
+    n = min(len(begins), len(ends))
+    if n - warmup < 3:
+        return None
+
+    def stats(xs: list[float]) -> dict:
+        xs = sorted(xs)
+        return {
+            "median": xs[len(xs) // 2],
+            "p95": xs[min(len(xs) - 1, int(0.95 * len(xs)))],
+            "max": xs[-1],
+        }
+
+    return {
+        "warmup_steps_excluded": warmup,
+        "steps_measured": n - warmup,
+        "first_step_seconds": ends[0] - begins[0],
+        # First on_step_begin to last on_step_end. train_only_seconds minus this
+        # is what an epoch costs outside its steps -- spawning dataloader
+        # workers, prefetching the first batch, tearing the loop down. One-off,
+        # so it must not be folded into a per-step figure and multiplied.
+        "steps_span_seconds": ends[n - 1] - begins[0],
+        "compute_seconds": stats([ends[i] - begins[i] for i in range(warmup, n)]),
+        "dataloader_gap_seconds": stats([begins[i + 1] - ends[i] for i in range(warmup, n - 1)]),
+        "cycle_seconds": stats([begins[i + 1] - begins[i] for i in range(warmup, n - 1)]),
+    }
+
+
+def _write_timing_json(
+    train_metrics: dict,
+    log_history: list[dict],
+    global_step: int,
+    begins: list[float],
+    ends: list[float],
+    out_path: Path,
+) -> Path:
+    """Record what the run cost in wall-clock seconds.
+
+    training.csv keeps loss and CER per step and drops every runtime field the
+    Trainer reports, so the only way to answer "how long would N hours of audio
+    take on this box" was to time the process by hand from outside. Eval is
+    subtracted out because it scales with the eval set and the eval interval,
+    not with the size of the training corpus -- extrapolating a total that has
+    eval baked into it overstates a longer run.
+
+    stage_seconds and model_load_seconds are filled in later by
+    merge_stage_timing: they happen outside trainer.train() and are not visible
+    from here.
+    """
+    import json
+    import torch
+
+    eval_seconds = sum(
+        v
+        for row in log_history
+        for k, v in row.items()
+        if k.endswith("_runtime") and not k.startswith("train")
+    )
+    total = train_metrics.get("train_runtime")
+    train_only = total - eval_seconds if total is not None else None
+    steady = _summarize_step_times(begins, ends)
+    timing = {
+        "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+        "peak_vram_allocated_gb": (
+            torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else None
+        ),
+        # Reserved is what nvidia-smi shows: the allocator holds on to freed
+        # blocks, so allocated alone understates what the card needs to have free.
+        "peak_vram_reserved_gb": (
+            torch.cuda.max_memory_reserved() / 1024**3 if torch.cuda.is_available() else None
+        ),
+        "train_runtime_seconds": total,
+        "eval_seconds": eval_seconds,
+        "train_only_seconds": train_only,
+        "steps": global_step,
+        "mean_seconds_per_step": train_only / global_step if train_only and global_step else None,
+        "samples_per_second": train_metrics.get("train_samples_per_second"),
+        "steady_state": steady,
+        # Inside train_runtime, but outside both eval and the steps themselves.
+        # Named because it is invisible otherwise: on the whisper-tiny run that
+        # first exercised this it was 51 of 55 seconds.
+        "train_overhead_seconds": (
+            train_only - steady["steps_span_seconds"]
+            if train_only is not None and steady is not None
+            else None
+        ),
+        "stage_seconds": None,
+        "model_load_seconds": None,
+        "dead_seconds": None,
+    }
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(timing, indent=2), encoding="utf-8")
+    return out_path
+
+
+def merge_stage_timing(
+    out_path: Path, *, stage_seconds: float, model_load_seconds: float
+) -> Path:
+    """Fold the costs that live outside trainer.train() into timing.json.
+
+    Pulling a 6.2 GB checkpoint off disk and building the datasets both happen
+    before the first step and never reach train_runtime, so a projection built
+    from train_runtime alone silently drops them. dead_seconds is what is left
+    of the stage once training and eval are accounted for.
+    """
+    import json
+
+    if not out_path.exists():
+        return out_path
+    timing = json.loads(out_path.read_text(encoding="utf-8"))
+    train_runtime = timing.get("train_runtime_seconds")
+    timing["stage_seconds"] = stage_seconds
+    timing["model_load_seconds"] = model_load_seconds
+    timing["dead_seconds"] = (
+        stage_seconds - train_runtime if train_runtime is not None else None
+    )
+    out_path.write_text(json.dumps(timing, indent=2), encoding="utf-8")
     return out_path

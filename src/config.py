@@ -67,6 +67,10 @@ class Training:
     limit: int | None = None   # cap train/val (+ood, if present) segment count for a
                                 # quick end-to-end dry run; null = full split. Separate
                                 # from eval.limit, which only affects baseline/gate evals.
+    val_limit: int | None = None   # cap only the in-training val/ood eval sets, leaving
+                                # train at full size. val grows with the corpus and is
+                                # re-decoded at every eval round; the full split is still
+                                # used by stage sweep-gate. null = no cap.
 
 
 @dataclass

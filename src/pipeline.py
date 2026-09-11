@@ -177,10 +177,13 @@ def stage_baseline(cfg) -> Path:
 
 
 def stage_train(cfg) -> Path:
+    import time
+
     from src.data import ManifestDataset
-    from src.train import train as run_train
+    from src.train import merge_stage_timing, train as run_train
     from transformers import WhisperForConditionalGeneration
 
+    stage_start = time.perf_counter()
     out = cfg.out_dir
     manifest_path = out / "validated_manifest.jsonl"
     if not manifest_path.exists():
@@ -207,12 +210,29 @@ def stage_train(cfg) -> Path:
         if ood_ds is not None:
             ood_ds = ood_ds.limit(cfg.training.limit)
 
+    if cfg.training.val_limit:
+        # In-training eval exists to pick the best checkpoint and feed early
+        # stopping, and the val split grows with the corpus -- 365 segments at
+        # 9 h of audio becomes roughly 3400 at 100 h, decoded from scratch at
+        # every eval round. Capping it here leaves the full split for stage
+        # sweep-gate, which is where the reported numbers come from.
+        val_ds = val_ds.limit(cfg.training.val_limit)
+        if ood_ds is not None:
+            ood_ds = ood_ds.limit(cfg.training.val_limit)
+
     # use_safetensors=False doesn't stop transformers' safetensors auto-conversion
     # probe thread from firing (403 on repos with discussions disabled, e.g.
     # PhoWhisper-*) -- the traceback it used to dump is silenced by
     # compat.silence_hf_discussions_403_noise(), applied via compat.apply() in main().
+    model_load_start = time.perf_counter()
     base_model = WhisperForConditionalGeneration.from_pretrained(cfg.base_model, use_safetensors=False)
+    model_load_seconds = time.perf_counter() - model_load_start
     best_dir = run_train(cfg, base_model, train_ds, val_ds, ood_ds, out)
+    merge_stage_timing(
+        out / "metrics" / "timing.json",
+        stage_seconds=time.perf_counter() - stage_start,
+        model_load_seconds=model_load_seconds,
+    )
     _write_state(out, "train")
     return best_dir
 

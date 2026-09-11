@@ -332,6 +332,101 @@ quá cao thì nảy hoặc đi lên. Cần `--stage baseline` xong trước (nó
 `validated_manifest.jsonl` của run). Mỗi probe ghi cả cây `outputs/{RUN_ID}-lr{lr}/`; probe
 nào đã có `training.csv` thì skip, nên phiên bị ngắt resume được.
 
+## B5b. Đo thời gian trước khi cam kết corpus lớn
+
+Trả lời câu "corpus N giờ thì train mất bao lâu". Chi phí một step **không** phụ thuộc kích
+thước corpus — model cố định, batch cố định, Whisper luôn pad audio về cửa sổ 30 s — nên đo
+trên corpus nhỏ rồi nhân với số step của corpus lớn. Chỉ số step thay đổi:
+
+```
+số step mỗi epoch = segment_train / (training.batch_size * training.grad_accum_steps)
+```
+
+### Chuẩn bị
+
+```bash
+R=v6-probe
+OV="--override run_id=$R --override lora.rank=32 --override lora.alpha=64  --override training.batch_size=16 --override training.grad_accum_steps=1  --override training.gradient_checkpointing=false  --override training.val_limit=32 --override data.real_bench_path=null"
+
+python -m src.pipeline --stage baseline $OV --override eval.limit=40
+```
+
+`eval.limit` chỉ cắt phần chấm điểm; `write_validated_manifest` chạy trước mọi eval nên
+manifest vẫn đầy đủ. `training.val_limit=32` để lần eval cuối epoch không nuốt mất phép đo.
+
+**Phải dùng `data.real_bench_path=null`, không phải `=None`.** `apply_override` đẩy giá trị
+qua `yaml.safe_load`, mà YAML đọc `None` thành chuỗi `'None'` — truthy — nên pipeline sẽ đi
+tìm thư mục tên `None`.
+
+### Probe 1 — trần cứng
+
+```bash
+python scripts/make_probe_manifest.py --run-dir outputs/$R --mode worst --steps 40 --batch 16
+python -m src.pipeline --stage train $OV --override training.epochs=1
+```
+
+`--mode worst` thay split train bằng 640 segment có nhãn dài nhất, nên mọi batch đều pad tới
+mức đắt nhất corpus có. Không batch nào trong lượt chạy thật vượt được con số này, và VRAM
+đỉnh cũng là trường hợp xấu nhất — trả lời luôn câu rank/batch có OOM không.
+
+Đừng dùng `training.limit` ở đây: manifest đã bị cắt sẵn rồi.
+
+### Probe 2 — chi phí điển hình
+
+```bash
+cp outputs/$R/validated_manifest.full.jsonl outputs/$R/validated_manifest.jsonl
+python scripts/make_probe_manifest.py --run-dir outputs/$R --mode random --steps 40 --batch 16 --force
+python -m src.pipeline --stage train $OV --override training.epochs=1
+```
+
+Khoảng cách giữa hai probe cho biết trần lỏng bao nhiêu.
+
+### Probe 3 — dữ liệu có kịp nuôi GPU không
+
+```bash
+sync && sudo sysctl -w vm.drop_caches=3     # bỏ nếu không có quyền root
+python scripts/probe_io.py --dataset <DATASET_PATH> --files 300 --target-hours 100     --workers 8 --batch 16 --seconds-per-step <đo được ở probe 2>     --feature-extractor vinai/PhoWhisper-large
+```
+
+Probe train chỉ đọc vài trăm file nằm sẵn trong page cache; một epoch 100 giờ đọc ~14 GB qua
+~53.000 file rời và resample phần lớn từ 24 kHz bằng CPU. Dòng `feed` dưới 1.0x nghĩa là GPU
+phải chờ dữ liệu — lúc đó tăng `dataloader_num_workers` hoặc resample sẵn corpus về 16 kHz,
+thuê card mạnh hơn không giúp gì.
+
+### Đọc kết quả
+
+`outputs/$R/metrics/timing.json`:
+
+| Trường | Ý nghĩa |
+|---|---|
+| `steady_state.cycle_seconds.median` | giây mỗi step, đã loại 10 step warmup — **số đem nhân** |
+| `steady_state.dataloader_gap_seconds.median` | phần chờ dữ liệu trong mỗi step |
+| `steady_state.compute_seconds.median` | phần tính toán thật |
+| `eval_seconds` | tổng thời gian eval trong lúc train |
+| `model_load_seconds` | nạp checkpoint ~6,2 GB |
+| `dead_seconds` | phần ngoài `trainer.train()`: nạp model, dựng dataset, ghi checkpoint |
+| `peak_vram_reserved_gb` | con số so với dung lượng card, khớp với `nvidia-smi` |
+
+Ngân sách tổng:
+
+```
+T = T_upload + T_baseline + T_train + T_sweepgate
+T_train = số_step × cycle_seconds + số_lần_eval × T_eval + dead_seconds
+```
+
+`T_baseline` đo riêng bằng một lần `--stage baseline` không cắt `eval.limit`, chia cho số
+segment test + OOD để ra chi phí sinh mỗi segment, rồi nhân lên theo corpus mới. Khoản này
+không rút ngắn được: gate so metric sau train với chính `metrics/baseline.json`, cắt baseline
+là hỏng gate.
+
+### Dọn sau khi đo
+
+```bash
+cp outputs/$R/validated_manifest.full.jsonl outputs/$R/validated_manifest.jsonl
+```
+
+Manifest của run probe đang là bản đã cắt. Chạy thật trên nó thì train chỉ thấy 640 segment.
+
 ## B6. `train`
 
 ```bash
