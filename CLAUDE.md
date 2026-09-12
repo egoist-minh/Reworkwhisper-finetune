@@ -114,6 +114,26 @@ That's the predecessor repo — real git history, real training runs, real evide
 - Code-switch detection: don't whitelist English words (72% false-positive rate observed). Use the Vietnamese syllable-shape regex test instead (see `PROJECT_CORE.md` §4).
 - `unpaid-dataset`, `dataset_by_task` haven't been profiled yet — don't assume these same warnings apply until someone checks. `done/` has been profiled (2026-07-31) and has its own set of caveats — reference transcript is post-edited PhoWhisper-small output, mixed number conventions, segments up to 212 s. See `PROJECT_CORE.md` §4 before using any tier-4 number.
 
+### "Tiến hành fine tune" = chạy trên server GPU thuê
+
+Cách chạy hiện tại là thuê một máy GPU theo giờ và chạy `src/pipeline.py` qua SSH — không
+phải Kaggle. Toàn bộ quy trình, từ sửa IP tới chép kết quả về, nằm trong
+**`docs/server-finetune.md`**; đọc file đó trước khi gõ lệnh. Bốn điều hay quên nhất:
+
+- **IP đổi mỗi lần thuê.** Host `speech-agent-gpu` trong `~/.ssh/config` trỏ tới lần thuê
+  trước. Hỏi người dùng IP mới, sửa `HostName`, rồi khảo sát máy — đừng giả định phần cứng.
+- **`pip install torch` hay lấy sai bản CUDA** so với driver trên máy. Kiểm
+  `torch.cuda.is_available()` trước khi chạy bất cứ thứ gì.
+- **`dataset/vivos` không nằm trong gói corpus**, phải dựng bằng `scripts/fetch_vivos.py`.
+  Thiếu nó là `--stage baseline` chết.
+- **Chép `outputs/<run_id>/` về trước khi trả máy.** Đã mất một lượt đo vì chép muộn.
+- **Run đứt thì `--stage train --resume`, đừng xoá `checkpoints/`.** Chạy lại stage train
+  khi đã có checkpoint là `FileExistsError` cố ý, và thông báo đưa ra cả hai lựa chọn —
+  xoá là mất số giờ GPU đã trả. Chỉ xoá khi thật sự muốn train lại từ step 1.
+
+Số liệu chi phí đo được trên H200 (0,728 giây mỗi step, ngân sách cho corpus 100 giờ, so
+sánh `eval.batch_size`): `docs/h200-timing-probe-2026-09-11.md`.
+
 ### Kaggle runner notebooks — two files, don't mix them up
 
 `notebooks/fine-tune-workflow.ipynb` is the **current template**: 35 cells, zero execution counts, `RUN_ID = "v4-mixed-r16"`. This is the one to edit and run. `docs/runbook.md` Part B walks it cell by cell.

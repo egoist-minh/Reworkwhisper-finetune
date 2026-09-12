@@ -6,9 +6,11 @@ the transformers 5.0.0 `Trainer(eval_dataset=dict)` multi-eval-set API this
 relies on has not been exercised in this repo yet.
 
 Checkpoint strategy: save to `checkpoints/best/` whenever `val_cer` improves.
-Early stopping: 3 eval-round patience. OOD eval runs every eval round (not
-just at the end) so forgetting is visible during training, not only after
-(§0 problem 2).
+An eval round is once per epoch by default, or every `training.eval_steps`
+steps when that is set -- see `_schedule_kwargs`. Early stopping: 3 eval-round
+patience, so the interval sets how much training a stop costs. OOD eval runs
+every eval round (not just at the end) so forgetting is visible during
+training, not only after (§0 problem 2).
 
 Early stopping AND best-checkpoint selection both go through one custom
 callback (`_EarlyStoppingState` + `RobustEvalTrackingCallback`, built in
@@ -75,6 +77,20 @@ class _EarlyStoppingState:
         self.best: float | None = None
         self.rounds_without_improvement = 0
 
+    def replay(self, values: list[float]) -> None:
+        """Rebuild state from a previous run's eval rounds, for a resume.
+
+        Trainer restores state.log_history from trainer_state.json, so the rounds
+        that already ran are known exactly and both the best value and the
+        patience counter come back. Without this the first eval round after a
+        resume always counts as an improvement, and RobustEvalTrackingCallback
+        overwrites checkpoints/best/ with a worse adapter -- the silent
+        best-model failure this class exists to prevent, reintroduced through
+        the back door.
+        """
+        for value in values:
+            self.update(value)
+
     def update(self, value: float) -> bool:
         """Record one eval round's metric value. Returns True if training should stop."""
         improved = self.best is None or (
@@ -104,8 +120,83 @@ def _make_compute_metrics(processor, normalizer: Normalizer):
     return compute_metrics
 
 
-def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
-    """cfg: src.config.Config. Returns the path to checkpoints/best/."""
+def _latest_checkpoint(checkpoints_dir: Path | str) -> Path | None:
+    """Highest-numbered resumable `checkpoint-<step>` under `checkpoints_dir`.
+
+    Trainer's own save directories only. `checkpoints/best/` holds an adapter and
+    nothing else -- RobustEvalTrackingCallback writes it with save_pretrained --
+    so it can restore weights but not the optimizer state, the LR schedule or the
+    data order, and resuming from it would restart step 1 with a warm adapter and
+    a cold everything else. A directory with no trainer_state.json is a save that
+    a dying box interrupted; it is skipped rather than resumed from.
+    """
+    d = Path(checkpoints_dir)
+    if not d.is_dir():
+        return None
+    found = [
+        (int(p.name.split("-", 1)[1]), p)
+        for p in d.glob("checkpoint-*")
+        if p.is_dir() and p.name.split("-", 1)[1].isdigit()
+        and (p / "trainer_state.json").is_file()
+    ]
+    return max(found, key=lambda pair: pair[0])[1] if found else None
+
+
+def _eval_val_cer_history(log_history: list[dict]) -> list[float]:
+    """Each eval round's val CER in order, from a (possibly restored) log_history.
+
+    log_history carries one row per logging event, and only eval rounds carry
+    eval_val_cer -- the per-step loss rows do not.
+    """
+    return [row["eval_val_cer"] for row in log_history if "eval_val_cer" in row]
+
+
+def _schedule_kwargs(eval_steps: int | None, total_steps: int) -> dict:
+    """Eval/save cadence for Seq2SeqTrainingArguments.
+
+    "epoch" was the only cadence until now, and on the 1-epoch runs the larger
+    corpora call for it collapses to a single eval after the last step: no CER
+    or OOD row while training is still running, and no checkpoint on disk to
+    resume from if the box dies at 80% -- the whole run is lost. eval_steps
+    turns both into a fixed step interval instead. save and eval share the
+    interval so every saved checkpoint has a val_cer measured at that step.
+
+    Kept as a separate function because train() cannot be imported without
+    torch, and this is the part worth a test.
+    """
+    if eval_steps is None:
+        return {"eval_strategy": "epoch", "save_strategy": "epoch"}
+    # An interval past the end of the run fires no eval round at all: nothing is
+    # scored, checkpoints/best/ is never written, and train() raises -- after the
+    # entire run has been paid for. Refuse before the GPU is touched.
+    if eval_steps > total_steps:
+        raise ValueError(
+            f"training.eval_steps={eval_steps} exceeds the {total_steps} steps this "
+            "run has, so no eval round would ever fire and no best checkpoint would "
+            f"be saved -- use at most {total_steps // 2} to get more than one round")
+    return {
+        "eval_strategy": "steps",
+        "save_strategy": "steps",
+        "eval_steps": eval_steps,
+        "save_steps": eval_steps,
+        # Adapter + optimizer state per checkpoint, once per interval instead of
+        # once per epoch -- unbounded on a long run. checkpoints/best/ is written
+        # separately by RobustEvalTrackingCallback and is not one of these, so
+        # rotation here cannot delete the best model.
+        "save_total_limit": 2,
+    }
+
+
+def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path,
+          resume: bool = False):
+    """cfg: src.config.Config. Returns the path to checkpoints/best/.
+
+    resume=True picks up from the newest `checkpoints/checkpoint-<step>` instead
+    of step 1, restoring optimizer state, LR schedule, data order and the eval
+    history behind early stopping. No checkpoint on disk is not an error -- an
+    interrupted run that never reached its first save has nothing to resume, and
+    starting over is the only option.
+    """
     import torch
     from transformers import (Seq2SeqTrainer, Seq2SeqTrainingArguments,
                                WhisperProcessor, TrainerCallback)
@@ -119,13 +210,14 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
     # transformers 5.17 dropped warmup_ratio and kept only warmup_steps. Feature-detect
     # rather than branch on a version string (src/compat.py), so an older transformers
     # keeps taking the ratio it understands.
+    steps_per_epoch = math.ceil(
+        len(train_ds) / (cfg.training.batch_size * cfg.training.grad_accum_steps))
+    total_steps = math.ceil(steps_per_epoch * cfg.training.epochs)
     if "warmup_ratio" in inspect.signature(Seq2SeqTrainingArguments.__init__).parameters:
         warmup_kwargs = {"warmup_ratio": cfg.training.warmup_ratio}
     else:
-        steps_per_epoch = math.ceil(
-            len(train_ds) / (cfg.training.batch_size * cfg.training.grad_accum_steps))
-        total_steps = math.ceil(steps_per_epoch * cfg.training.epochs)
         warmup_kwargs = {"warmup_steps": round(cfg.training.warmup_ratio * total_steps)}
+    schedule_kwargs = _schedule_kwargs(cfg.training.eval_steps, total_steps)
     processor = WhisperProcessor.from_pretrained(cfg.base_model)
     model = get_peft_model(base_model, build_lora_config(cfg))
     model.print_trainable_parameters()
@@ -164,8 +256,7 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
         dataloader_num_workers=min(8, os.cpu_count() or 1),
         predict_with_generate=True,
         generation_num_beams=cfg.eval.num_beams,
-        eval_strategy="epoch",
-        save_strategy="epoch",
+        **schedule_kwargs,
         # Default is 500 -- TrainingDisplayCallback's TrainLoss column would stay
         # "-" for the whole run on anything under that many steps.
         logging_steps=1,
@@ -221,6 +312,16 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
         `eval_val_cer` improves, so this is the sole authority on which
         checkpoint is "best" -- Trainer's own bookkeeping is not consulted."""
 
+        def on_train_begin(self, args, state, control, **kwargs):
+            # Empty on a fresh run; on a resume it is the pre-crash eval rounds,
+            # restored from trainer_state.json before this fires.
+            history = _eval_val_cer_history(state.log_history)
+            if history:
+                stopping.replay(history)
+                print(f"resume: {len(history)} eval rounds replayed, "
+                      f"best val_cer so far {stopping.best:.6f}")
+            return control
+
         def on_evaluate(self, args, state, control, metrics=None, model=None, **kwargs):
             if metrics is None or "eval_val_cer" not in metrics:
                 return control
@@ -245,11 +346,25 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
             self.eval_bar = None
             self.last_train_loss = None
             self._pending = {}
+            self._progress_every = 1
+            self._t0 = None
+            self._step0 = 0
 
         def on_train_begin(self, args, state, control, **kwargs):
             from tqdm.auto import tqdm
 
-            self.bar = tqdm(total=state.max_steps, desc="train", unit="step")
+            self.bar = tqdm(total=state.max_steps, initial=state.global_step,
+                             desc="train", unit="step")
+            self._t0 = time.perf_counter()
+            # Nonzero on a resume: seconds-per-step and the ETA have to divide by
+            # the steps THIS process ran, not by an absolute step number that
+            # counts steps some earlier, already-paid-for process did.
+            self._step0 = state.global_step
+            # The bar redraws in place with a carriage return, which is unreadable
+            # in the run.log a detached run leaves behind. These lines are the
+            # progress trace that survives a plain tail: ~50 of them however
+            # many steps the run has.
+            self._progress_every = max(1, state.max_steps // 50)
             tqdm.write(self._ROW_FMT.format(
                 "Epoch", "Step", "TrainLoss", "ValLoss", "ValCER", "ValWER", "OOD_CER"
             ))
@@ -275,6 +390,21 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
         def on_step_end(self, args, state, control, **kwargs):
             if self.bar is not None:
                 self.bar.update(1)
+            done = state.global_step - self._step0
+            if not done or state.global_step % self._progress_every:
+                return control
+            from tqdm.auto import tqdm
+
+            elapsed = time.perf_counter() - self._t0
+            per_step = elapsed / done
+            remaining = per_step * (state.max_steps - state.global_step)
+            loss = f"{self.last_train_loss:.3f}" if self.last_train_loss is not None else "-"
+            tqdm.write(
+                f"progress step {state.global_step}/{state.max_steps} "
+                f"loss={loss} sec_per_step={per_step:.3f} "
+                f"elapsed={elapsed / 60:.1f}m eta={remaining / 60:.1f}m"
+            )
+            return control
 
         def on_evaluate(self, args, state, control, metrics=None, model=None, **kwargs):
             if self.eval_bar is not None:
@@ -316,7 +446,16 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path):
     # disable_tqdm=True makes Trainer default-add PrinterCallback, which dumps every
     # log event as a raw dict -- that's the noise TrainingDisplayCallback replaces.
     trainer.remove_callback(PrinterCallback)
-    result = trainer.train()
+    checkpoint = _latest_checkpoint(out / "checkpoints") if resume else None
+    if resume:
+        # Trainer replays the consumed batches to restore the exact data order
+        # (ignore_data_skip stays False). That costs a dataloader pass over what
+        # was already seen, which the probe measured at 83.9x the rate the GPU
+        # consumes it -- seconds, not minutes, and worth it for a data order that
+        # matches what the checkpoint was trained on.
+        print(f"resume: {checkpoint}" if checkpoint is not None else
+              "resume: no resumable checkpoint found, starting from step 1")
+    result = trainer.train(resume_from_checkpoint=str(checkpoint) if checkpoint else None)
 
     if stopping.best is None:
         raise RuntimeError(

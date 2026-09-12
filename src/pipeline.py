@@ -13,7 +13,10 @@ each stage assumes prior stages' artifacts already exist on disk):
                    Kaggle code never works first try).
     baseline    -- Stage 1: validate manifest, eval base model, write
                    metrics/baseline.json.
-    train       -- Stage 2: SFT training -> checkpoints/best/.
+    train       -- Stage 2: SFT training -> checkpoints/best/. `--resume`
+                   continues from the newest checkpoints/checkpoint-<step>;
+                   without it, finding one at all is an error rather than an
+                   overwrite.
     sweep-gate  -- Stage 3 + 4: lambda sweep (hard fail if no lambda fits the
                    OOD budget) -> gate (tiers 1, 2, 4a only, see gate.py) ->
                    push to HF iff gate passes and hub.push is true.
@@ -176,15 +179,67 @@ def stage_baseline(cfg) -> Path:
     return baseline_path
 
 
-def stage_train(cfg) -> Path:
+def archive_run(out_dir: Path | str) -> Path | None:
+    """Zip a run's results and adapter into one file next to the run directory.
+
+    Written whether the gate passed or failed, and whether the stage finished or
+    raised: a failed run's CER tables and predictions are the evidence for what
+    to change next, and the box they sit on is rented by the hour. One file
+    because scp of a directory tree is the step people skip.
+
+    Everything under outputs/{run_id} except `checkpoints/checkpoint-<step>` --
+    those are optimizer state for --resume, hundreds of MB each, and dead weight
+    once the box is released. `checkpoints/best/` and `adapter/` are the model
+    and they go in. Returns None if there is nothing to archive yet.
+    """
+    import zipfile
+
+    out = Path(out_dir)
+    if not out.is_dir():
+        return None
+    dest = out.parent / f"{out.name}.zip"
+    files = [
+        f for f in sorted(out.rglob("*"))
+        if f.is_file()
+        and not any(part.startswith("checkpoint-") and part[11:].isdigit()
+                    for part in f.relative_to(out).parts)
+    ]
+    if not files:
+        return None
+    # compresslevel 1: the bulk is safetensors weights, which do not compress --
+    # paying level 6 for them buys nothing but minutes.
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as z:
+        for f in files:
+            z.write(f, f.relative_to(out.parent))
+    print(f"archive: {dest} ({len(files)} files, "
+          f"{dest.stat().st_size / 1024**2:.1f} MB) -- scp this off the box")
+    return dest
+
+
+def stage_train(cfg, resume: bool = False) -> Path:
     import time
 
+    from src.train import _latest_checkpoint
+
+    stage_start = time.perf_counter()
+    out = cfg.out_dir
+    # Training is the expensive stage and a rented box can die mid-run, so an
+    # existing checkpoint is never overwritten by accident: say which of the two
+    # things you meant. Silently restarting would throw away paid-for GPU hours;
+    # silently resuming would let a changed config finish a run it did not start.
+    existing = _latest_checkpoint(out / "checkpoints")
+    if existing is not None and not resume:
+        raise FileExistsError(
+            f"{existing} already exists -- this run has trained before. Pass "
+            "--resume to continue from it, or delete "
+            f"{out / 'checkpoints'} to train from step 1.")
+
+    # Imported after the guard so a re-run that needs --resume fails in a second
+    # instead of after a torch import and a model download.
     from src.data import ManifestDataset
     from src.train import merge_stage_timing, train as run_train
     from transformers import WhisperForConditionalGeneration
 
-    stage_start = time.perf_counter()
-    out = cfg.out_dir
     manifest_path = out / "validated_manifest.jsonl"
     if not manifest_path.exists():
         raise FileNotFoundError(f"{manifest_path} missing -- run stage baseline first")
@@ -227,7 +282,7 @@ def stage_train(cfg) -> Path:
     model_load_start = time.perf_counter()
     base_model = WhisperForConditionalGeneration.from_pretrained(cfg.base_model, use_safetensors=False)
     model_load_seconds = time.perf_counter() - model_load_start
-    best_dir = run_train(cfg, base_model, train_ds, val_ds, ood_ds, out)
+    best_dir = run_train(cfg, base_model, train_ds, val_ds, ood_ds, out, resume=resume)
     merge_stage_timing(
         out / "metrics" / "timing.json",
         stage_seconds=time.perf_counter() - stage_start,
@@ -373,6 +428,10 @@ def main() -> None:
     ap.add_argument("--config", default="configs/experiment.yaml")
     ap.add_argument("--stage", choices=list(STAGES), required=True)
     ap.add_argument("--override", action="append", default=[])
+    ap.add_argument("--resume", action="store_true",
+                     help="stage train only: continue from the newest "
+                          "outputs/{run_id}/checkpoints/checkpoint-<step> instead of "
+                          "starting over")
     args = ap.parse_args()
 
     cfg = load(args.config, overrides=args.override)
@@ -381,11 +440,20 @@ def main() -> None:
     _quiet_known_noise()
 
     try:
-        STAGES[args.stage](cfg)
+        STAGES[args.stage](cfg, **({"resume": args.resume} if args.stage == "train" else {}))
     except Exception:
         from src.compat import version_table
         print("PIPELINE FAILED. Environment:", version_table(), file=sys.stderr)
         raise
+    finally:
+        if args.stage != "smoke":
+            # Its own try: a broken archive must never replace the real traceback
+            # of whatever just failed.
+            try:
+                archive_run(cfg.out_dir)
+            except Exception as exc:
+                print(f"archive failed ({exc}) -- copy {cfg.out_dir} by hand",
+                      file=sys.stderr)
 
 
 if __name__ == "__main__":

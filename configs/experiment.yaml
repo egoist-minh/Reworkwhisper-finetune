@@ -74,6 +74,12 @@ training:
   val_limit: null                     # cap only the in-training val/ood eval sets; train stays
                                        # full. val is re-decoded every eval round and grows with
                                        # the corpus; sweep-gate still uses the full split
+  eval_steps: null                    # eval + checkpoint every N steps; null = once per epoch.
+                                       # Set it on any 1-epoch run: "epoch" then means a single
+                                       # eval after the last step, no CER row while training is
+                                       # still going and nothing on disk to resume from. Aim for
+                                       # 5-8 rounds (total_steps // 6); each round decodes val
+                                       # + ood, so more rounds cost real minutes
 
 sweep:
   lambdas: [0.0, 0.25, 0.5, 0.75, 1.0]

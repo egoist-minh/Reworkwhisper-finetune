@@ -61,7 +61,9 @@ of the weekly free-tier quota. The ViMedCSS cell defaults to `REUSE_VIMEDCSS = F
 both splits are decoded fresh in this run. Set it to `True` to import the 2026-09-09
 decodes from `Outputs/vimedcss_output/` instead and spend ~4.2 h less.
 
-ElevenLabs is billed by audio hour (~$0.22/h): the full matrix is ~8.4 h ≈ **$1.9**.
+ElevenLabs is billed by audio hour (~$0.22/h). It skips `synthetic-test` (ElevenLabs TTS audio
+-- a vendor transcribing its own synthesizer), leaving ~7.8 h ≈ **$1.7**, of which
+`cross-domain` (1.30 h) is already paid for and tracked in git.
 Every backend resumes by `segment_id`, so an interrupted session never re-decodes — and
 never re-bills — what it already wrote.
 """)
@@ -334,16 +336,21 @@ code(r"""
 """)
 
 code(r"""
-# ONE SUITE PER RUN. Not GPU_SUITES: a free-tier key runs out of credit mid-way, and a
-# half-decoded suite narrows the shared segment set for EVERY model on that suite,
-# not just this one. Finish a suite, save it, then change this line.
-#   youtube-test 1.00 h -> synthetic-test 0.58 h -> cross-domain 1.30 h (done)
-#   -> vivos 0.75 h -> vimedcss-test 3.38 h -> vimedcss-hard 1.38 h
-EL_SUITE = "youtube-test"
+# Every suite EXCEPT synthetic-test, in one run. The script loops suites itself and
+# resumes by segment_id, so an interrupted session continues where it stopped.
+#
+# synthetic-test is left out on purpose: paid-dataset's audio is TTS spoken by ten
+# ElevenLabs voices (CLAUDE.md), so scoring ElevenLabs ASR on it measures a vendor
+# transcribing its own synthesizer, not Vietnamese recognition.
+#
+# Ordered cheapest-and-most-wanted first, because a free-tier key runs out of credit
+# mid-list: youtube-test is the empty cell the 2026-09-17 table needs, cross-domain
+# is already done and costs nothing, vimedcss-test is 3.38 h and goes last.
+EL_SUITES = "youtube-test,vivos,cross-domain,vimedcss-hard,vimedcss-test"
 
 !python -m scripts.benchmark_run \
     --backend elevenlabs --model {EL_MODEL} \
-    --suites {EL_SUITE} {PATHS} \
+    --suites {EL_SUITES} {PATHS} \
     --out {OUT_DIR} {LIMIT}
 """)
 

@@ -4,7 +4,7 @@ within OOD budget"."""
 
 import pytest
 
-from src.pipeline import select_lambda, _write_sweep_csv, _cer_by_source
+from src.pipeline import archive_run, select_lambda, stage_train, _write_sweep_csv, _cer_by_source
 
 # v3-r16's actual metrics/lambda_sweep.csv (Outputs/v3-r16/metrics/lambda_sweep.csv).
 V3_R16_SWEEP_ROWS = [
@@ -112,3 +112,66 @@ def test_write_sweep_csv_backward_compatible_without_per_source_columns(tmp_path
     out = _write_sweep_csv(rows, tmp_path / "lambda_sweep.csv")
     lines = out.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
+
+
+# --- stage_train's overwrite guard. Runs before the torch import on purpose, so
+# a re-run that should have said --resume fails in a second, not after a download.
+
+def _cfg_with_checkpoint(tmp_path, step=200):
+    from types import SimpleNamespace
+
+    d = tmp_path / "checkpoints" / f"checkpoint-{step}"
+    d.mkdir(parents=True)
+    (d / "trainer_state.json").write_text("{}", encoding="utf-8")
+    return SimpleNamespace(out_dir=tmp_path)
+
+
+def test_stage_train_refuses_to_overwrite_an_existing_checkpoint(tmp_path):
+    with pytest.raises(FileExistsError, match="--resume"):
+        stage_train(_cfg_with_checkpoint(tmp_path))
+
+
+def test_stage_train_with_resume_gets_past_the_guard(tmp_path):
+    # Fails later for want of a manifest/torch, but NOT on the guard.
+    with pytest.raises(Exception) as e:
+        stage_train(_cfg_with_checkpoint(tmp_path), resume=True)
+    assert not isinstance(e.value, FileExistsError)
+
+
+# --- archive_run: one file to scp off a rented box, written pass or fail.
+
+def _run_dir(tmp_path):
+    out = tmp_path / "v6-x"
+    (out / "metrics").mkdir(parents=True)
+    (out / "metrics" / "gate_results.json").write_text('{"overall_pass": false}', encoding="utf-8")
+    (out / "checkpoints" / "best").mkdir(parents=True)
+    (out / "checkpoints" / "best" / "adapter_model.safetensors").write_text("w", encoding="utf-8")
+    (out / "checkpoints" / "checkpoint-200").mkdir(parents=True)
+    (out / "checkpoints" / "checkpoint-200" / "optimizer.pt").write_text("big", encoding="utf-8")
+    return out
+
+
+def _names(zip_path):
+    import zipfile
+
+    with zipfile.ZipFile(zip_path) as z:
+        return set(z.namelist())
+
+
+def test_archive_keeps_results_and_model_drops_resume_state(tmp_path):
+    names = _names(archive_run(_run_dir(tmp_path)))
+    assert "v6-x/metrics/gate_results.json" in names          # failed gate still archived
+    assert "v6-x/checkpoints/best/adapter_model.safetensors" in names
+    # Optimizer state is for --resume on THIS box; useless once it is released.
+    assert not any("checkpoint-200" in n for n in names)
+
+
+def test_archive_lands_next_to_the_run_directory(tmp_path):
+    out = _run_dir(tmp_path)
+    assert archive_run(out) == tmp_path / "v6-x.zip"
+
+
+def test_archive_of_a_missing_or_empty_run_is_not_an_error(tmp_path):
+    assert archive_run(tmp_path / "nope") is None
+    (tmp_path / "empty").mkdir()
+    assert archive_run(tmp_path / "empty") is None

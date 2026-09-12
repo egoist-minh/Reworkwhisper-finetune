@@ -71,6 +71,9 @@ class Training:
                                 # train at full size. val grows with the corpus and is
                                 # re-decoded at every eval round; the full split is still
                                 # used by stage sweep-gate. null = no cap.
+    eval_steps: int | None = None   # eval + checkpoint every N steps. null = once per
+                                # epoch, which on a 1-epoch run means a single eval at
+                                # the very end and no recoverable checkpoint before it.
 
 
 @dataclass
@@ -167,6 +170,8 @@ def validate(cfg: Config) -> None:
         raise ValueError("eval.limit must be a positive int or null")
     if cfg.training.limit is not None and cfg.training.limit <= 0:
         raise ValueError("training.limit must be a positive int or null")
+    if cfg.training.eval_steps is not None and cfg.training.eval_steps <= 0:
+        raise ValueError("training.eval_steps must be a positive int or null")
     # PyYAML is YAML 1.1: a float literal needs a decimal point, so
     # `--override training.learning_rate=5e-05` resolves to the *string* "5e-05"
     # and nothing catches it until AdamW compares it to a float, ~200 frames into
