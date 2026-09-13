@@ -175,3 +175,71 @@ def test_archive_of_a_missing_or_empty_run_is_not_an_error(tmp_path):
     assert archive_run(tmp_path / "nope") is None
     (tmp_path / "empty").mkdir()
     assert archive_run(tmp_path / "empty") is None
+
+
+# ------------------------------------------------- sweep.retention_floor (v7 plan §2.2)
+
+# v6-corpus-r32's real sweep rows, with the val retention each lambda actually
+# held. Retention rises with lambda here while val CER bottoms out at 0.5 --
+# exactly the trade the old rule could not see.
+V6_SWEEP_ROWS_WITH_RETENTION = [
+    {"lambda": 0.0, "val_cer": 0.1024350054924936, "ood_cer": 0.0225799310584738,
+     "val_retention": 0.37},
+    {"lambda": 0.25, "val_cer": 0.05794580739655804, "ood_cer": 0.0246355270231808,
+     "val_retention": 0.58},
+    {"lambda": 0.5, "val_cer": 0.044100146466495786, "ood_cer": 0.028209101546440657,
+     "val_retention": 0.64},
+    {"lambda": 0.75, "val_cer": 0.0454274990845844, "ood_cer": 0.03794946396382151,
+     "val_retention": 0.72},
+    {"lambda": 1.0, "val_cer": 0.04755584035151959, "ood_cer": 0.05205401473704184,
+     "val_retention": 0.75},
+]
+
+
+def test_select_lambda_without_a_floor_is_unchanged():
+    best = select_lambda(V6_SWEEP_ROWS_WITH_RETENTION, V3_R16_BASELINE_OOD_CER,
+                          ood_cer_budget=0.02, elbow_ratio_threshold=10.0)
+    assert best == 0.5
+
+
+def test_retention_floor_drops_the_lambdas_below_it_before_the_elbow_walk():
+    # 0.5 is the elbow but holds only 0.64 retention; with a 0.666 floor the
+    # only eligible lambdas are 0.75 and 1.0.
+    best = select_lambda(V6_SWEEP_ROWS_WITH_RETENTION, V3_R16_BASELINE_OOD_CER,
+                          ood_cer_budget=0.02, elbow_ratio_threshold=10.0,
+                          retention_floor=0.666)
+    assert best == 0.75
+
+
+def test_retention_floor_no_lambda_clears_it_is_a_hard_fail():
+    with pytest.raises(RuntimeError, match="retention_floor"):
+        select_lambda(V6_SWEEP_ROWS_WITH_RETENTION, V3_R16_BASELINE_OOD_CER,
+                      ood_cer_budget=0.02, elbow_ratio_threshold=10.0,
+                      retention_floor=0.9)
+
+
+def test_retention_floor_raises_on_a_sweep_that_never_measured_retention():
+    # v6-corpus-r32's lambda_sweep.csv as it exists on disk: no val_retention
+    # column at all. Selecting blind to a constraint that was explicitly asked
+    # for is worse than stopping.
+    with pytest.raises(RuntimeError, match="no val_retention"):
+        select_lambda(V3_R16_SWEEP_ROWS, V3_R16_BASELINE_OOD_CER,
+                      ood_cer_budget=0.02, elbow_ratio_threshold=10.0,
+                      retention_floor=0.666)
+
+
+def test_retention_floor_still_respects_the_ood_budget():
+    # 0.75 and 1.0 clear the floor but blow the budget; 0.5 clears the budget
+    # but not the floor -- nothing is left, and no soft fallback is allowed.
+    with pytest.raises(RuntimeError):
+        select_lambda(V6_SWEEP_ROWS_WITH_RETENTION, V3_R16_BASELINE_OOD_CER,
+                      ood_cer_budget=0.005, elbow_ratio_threshold=10.0,
+                      retention_floor=0.666)
+
+
+def test_write_sweep_csv_carries_the_retention_column(tmp_path):
+    rows = [{"lambda": 0.5, "val_cer": 0.04, "ood_cer": 0.02, "val_retention": 0.64}]
+    out = _write_sweep_csv(rows, tmp_path / "lambda_sweep.csv")
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert "val_retention" in lines[0]
+    assert "0.64" in lines[1]

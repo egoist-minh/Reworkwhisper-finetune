@@ -33,7 +33,8 @@ from src.normalize import Normalizer
 
 
 def select_lambda(sweep_rows: list[dict], baseline_ood_cer: float,
-                   ood_cer_budget: float, elbow_ratio_threshold: float) -> float:
+                   ood_cer_budget: float, elbow_ratio_threshold: float,
+                   retention_floor: float | None = None) -> float:
     """Cost/benefit lambda selection (PROJECT_CORE.md §6 Stage 3, SESSIONS.md E2).
 
     Replaces "largest lambda within the OOD budget": that rule picked
@@ -57,11 +58,40 @@ def select_lambda(sweep_rows: list[dict], baseline_ood_cer: float,
     (SESSIONS.md, the v5 production regression). A free step carries no
     cost/benefit signal, so it defines no elbow.
 
-    Raises if no lambda in the grid is budget-safe (mirrors the previous
-    hard-fail contract).
+    `retention_floor` (docs/v6-curriculum-plan.md §2.2) drops every lambda whose
+    `val_retention` is below it BEFORE the elbow walk, so a lambda that buys val
+    CER by dropping loanwords cannot be the elbow. v6-corpus-r32's sweep had
+    nothing watching retention and picked 0.5, shipping 48.6% cross-domain
+    retention against v5's 66.6%. The floor is measured on val, which is
+    in-corpus and inflated by memorisation -- gates.cross_domain_retention_min
+    is the out-of-corpus bound, this is only a guard against the worst lambdas.
+
+    Raises if no lambda in the grid is budget-safe, or if none clears the
+    retention floor (mirrors the previous hard-fail contract -- no soft fallback
+    to a lower floor, CLAUDE.md).
     """
     rows = sorted((r for r in sweep_rows if r["ood_cer"] is not None),
                   key=lambda r: r["lambda"])
+
+    if retention_floor is not None:
+        blind = [r["lambda"] for r in rows if r.get("val_retention") is None]
+        if blind:
+            raise RuntimeError(
+                f"select_lambda: sweep.retention_floor={retention_floor} is set but "
+                f"lambdas {blind} carry no val_retention -- an older sweep CSV, or a val "
+                "split with no non-Vietnamese-shaped reference tokens to measure. "
+                "HARD FAIL rather than select blind to the constraint that was asked for.")
+        rejected = [(r["lambda"], r["val_retention"]) for r in rows
+                    if r["val_retention"] < retention_floor]
+        if rejected:
+            print(f"select_lambda: retention_floor={retention_floor} rejects "
+                  + ", ".join(f"lambda={lam} (retention {ret:.4f})" for lam, ret in rejected))
+        rows = [r for r in rows if r["val_retention"] >= retention_floor]
+        if not rows:
+            raise RuntimeError(
+                f"select_lambda: no lambda in cfg.sweep.lambdas holds val retention at or "
+                f"above sweep.retention_floor={retention_floor} -- HARD FAIL, no adapter "
+                "selected, no push. Do not lower the floor to get past this.")
 
     best = None
     prev_ratio = None
@@ -297,6 +327,7 @@ def stage_sweep_gate(cfg) -> Path:
     from src.asr import load_for_eval
     from src.gate import run_gate, write_gate_results, _eval_split, _meeting_to_source
     from src.lora import set_lambda, save_with_lambda
+    from src.metrics import english_token_retention
 
     out = cfg.out_dir
     baseline = json.loads((out / "metrics" / "baseline.json").read_text(encoding="utf-8"))
@@ -326,11 +357,17 @@ def stage_sweep_gate(cfg) -> Path:
         val_metrics = _eval_split(model, processor, val_ds, normalizer, cfg.eval,
                                    desc=f"sweep:lambda={lam}:val")
         val_cer_by_source = _cer_by_source(val_metrics["_predictions"], val_meeting_to_source)
+        # Same decode the val CER above came from -- no extra GPU cost. Feeds
+        # sweep.retention_floor; see select_lambda.
+        val_retention = english_token_retention(
+            [r["ref"] for r in val_metrics["_predictions"]],
+            [r["hyp"] for r in val_metrics["_predictions"]])["retention"]
         ood_cer = (_eval_split(model, processor, ood_ds, normalizer, cfg.eval,
                                 desc=f"sweep:lambda={lam}:ood")["cer"]
                    if ood_ds is not None else None)
         sweep_rows.append({
             "lambda": lam, "val_cer": val_metrics["cer"], "ood_cer": ood_cer,
+            "val_retention": val_retention,
             "val_cer_synthetic": val_cer_by_source.get("synthetic"),
             "val_cer_youtube": val_cer_by_source.get("youtube"),
         })
@@ -338,7 +375,8 @@ def stage_sweep_gate(cfg) -> Path:
     _write_sweep_csv(sweep_rows, out / "metrics" / "lambda_sweep.csv")
 
     best_lambda = select_lambda(sweep_rows, baseline.get("cer_ood", float("inf")),
-                                 cfg.sweep.ood_cer_budget, cfg.sweep.elbow_ratio_threshold)
+                                 cfg.sweep.ood_cer_budget, cfg.sweep.elbow_ratio_threshold,
+                                 cfg.sweep.retention_floor)
 
     adapter_dir = save_with_lambda(model, best_lambda, out / "adapter")
 
@@ -353,10 +391,18 @@ def stage_sweep_gate(cfg) -> Path:
         real_ds = ManifestDataset(records=real_records,
                                    audio_root=Path(cfg.data.real_bench_path) / "audio")
 
+    cross_domain_ds = None
+    if cfg.data.cross_domain_path:
+        cross_records = load_manifests(cfg.data.cross_domain_path)
+        cross_domain_ds = ManifestDataset(
+            records=cross_records,
+            audio_root=Path(cfg.data.cross_domain_path) / "audio")
+
     baseline_real_csv = out / "audit" / "predictions_baseline_real.csv"
     baseline_test_csv = out / "audit" / "predictions_baseline_test.csv"
     results = run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseline,
-                        baseline_real_csv=baseline_real_csv, baseline_test_csv=baseline_test_csv)
+                        baseline_real_csv=baseline_real_csv, baseline_test_csv=baseline_test_csv,
+                        cross_domain_ds=cross_domain_ds)
     gate_path = write_gate_results(results, out)
 
     if results["overall_pass"] and cfg.hub.push:
@@ -393,7 +439,8 @@ def _write_sweep_csv(rows: list[dict], out_path: Path) -> Path:
     import csv
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fields = ["lambda", "val_cer", "ood_cer", "val_cer_synthetic", "val_cer_youtube"]
+    fields = ["lambda", "val_cer", "ood_cer", "val_retention",
+              "val_cer_synthetic", "val_cer_youtube"]
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fields, restval="")
         writer.writeheader()

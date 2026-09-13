@@ -88,7 +88,21 @@ Full design spec, module contracts, config schema, and gate rules live in `PROJE
 
 As of 2026-09-09, `src/`, `configs/`, `scripts/`, `tests/`, `dataset/` and two runs' artifacts (`Outputs/v3-r16/`, `Outputs/v4-mixed-r16/`) all exist. Both have run end-to-end on Kaggle T4 and both are published: `Reworkwhisper-large-v4` = `v3-r16` at λ=0.5, `Reworkwhisper-large-v5` = `v4-mixed-r16` at λ=0.75 (in production since 2026-08-18). Repo names lag run ids — don't map them by number.
 
-Two things the config claims that the local disk does not have: `data.dataset_path` points at `dataset/mixed-noisy-v1`, which was built on Kaggle and never on this machine; and `dataset/youtube-meetings/manifest.*.jsonl` here is the **pre-review** snapshot (all `verified: false`) even though the corpus that trained `v4-mixed-r16` was reviewed 790/790. Still check before assuming a specific module or config field is present — anything described below as "planned" or "todo" (see `SESSIONS.md`) does not exist on disk until it's built.
+`data.dataset_path` still points at `dataset/mixed-noisy-v1` (the `v4-mixed-r16` corpus) — that one is now present and checksum-verified on this machine too, not Kaggle-only as before. `dataset/youtube-meetings/manifest.*.jsonl` here is still the **pre-review** snapshot (all `verified: false`) even though the corpus that trained `v4-mixed-r16` was reviewed 790/790. Still check before assuming a specific module or config field is present — anything described below as "planned" or "todo" (see `SESSIONS.md`) does not exist on disk until it's built.
+
+**The next run trains on `v6-corpus`, not `mixed-noisy-v1`.** Built 2026-09-12 by
+`scripts/build_v6_corpus.py` (commit `367d88a`) from two HuggingFace train-only drops
+(`rework-whisper-v6-org/youtube-meeting-1`, `rework-whisper-v6-org/50h-elevenlab-data`)
+plus the local val/test splits at `Outputs/splits-export/{val,test}`. Published **private**
+as `rework-whisper-v6-org/v6-corpus` (one file, `v6-corpus.tar`, 14.7 GB) — it is not on
+this machine or on any GPU box right now, only on HF. 35,544 records: train 34,525 seg /
+99.28 h / 286 meetings (50.3% synthetic / 49.7% YouTube), val 365 seg / 0.79 h, test 654
+seg / 1.58 h. `configs/experiment.yaml` still says `run_id: v4-mixed-r16` and
+`dataset_path: dataset/mixed-noisy-v1` — a v6 run overrides both at the command line
+(`docs/server-finetune.md` §4's `R=v6-<mô tả>` recipe), it does not edit the config file.
+Test voice_ids are disjoint from train's; val's are not (all 7 of val's appear in train) —
+see `v6-corpus-merge-blockers.md` in memory for the full list of things that differ from
+what the two source repos' own cards claim.
 
 ### Relationship to `D:\phowhisper-finetune-exp`
 

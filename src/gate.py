@@ -8,6 +8,12 @@ updating configs/experiment.yaml + PROJECT_CORE.md first.
 Any tier FAIL halts the pipeline: no adapter is marked pass, nothing pushed
 to HF (§0 problem 4, "Fail Loudly").
 
+`cross_domain_bench` (added 2026-09-13, docs/v6-curriculum-plan.md §2.3) is a
+fourth check alongside those three, not a numbered tier -- see
+`score_cross_domain`. It is the only one that scores audio from outside every
+training corpus, which is what let v6-corpus-r32 pass all three tiers while
+losing 18pp of loanword retention against the adapter in production.
+
 Tier 4a statistical rigor (added 2026-08-02, PROJECT_CORE.md §4 "statistical
 power" + "six properties that limit what tier 4 can claim"): with only ~264
 real-bench segments from 2 recordings, a bare point-estimate CER comparison
@@ -78,7 +84,7 @@ from pathlib import Path
 
 from src.asr import transcribe_batch
 from src.metrics import (score, char_counts, rate, bootstrap_ci, bootstrap_delta_ci, verdict,
-                          english_token_retention)
+                          english_token_retention, foreign_token_counts)
 from src.normalize import Normalizer
 
 
@@ -197,6 +203,80 @@ def _score_by_source(predictions: list[dict], meeting_to_source: dict[str, str],
     return result
 
 
+def score_cross_domain(predictions: list[dict], cer_max: float | None = None,
+                        retention_min: float | None = None,
+                        no_loanword_cer_max: float | None = None) -> dict:
+    """The cross-domain check (`data.cross_domain_path`, docs/v6-curriculum-plan.md §2.3).
+
+    Not one of PROJECT_CORE.md §6's numbered tiers -- those all score a split of
+    the training corpus or the ML-talk real benchmark, and none of them can see
+    what this one is for. Three numbers over out-of-corpus real audio carrying
+    loanwords at production density:
+
+      * `cer` -- the headline, bounded by `cer_max`.
+      * `retention` -- `english_token_retention`. v6-corpus-r32 passed every
+        existing tier while dropping this from v5's 66.6% to 48.6%: tier 1
+        measures retention on the in-corpus test split, where 84.8% of loanword
+        instances are also in the train labels, and tier 2 (VIVOS) has none at all.
+      * `cer_no_loanword` -- CER over the segments whose reference carries no
+        loanword candidate at all, bounded by `no_loanword_cer_max`. Insurance
+        against the opposite failure: a candidate that recovers its loanword
+        prior by giving back the Vietnamese modelling a bigger corpus bought.
+
+    Bounds are ABSOLUTE, not relative to a per-run baseline: this audio is
+    outside every training corpus, so the meaningful comparison is against the
+    adapter currently in production, not against the base model. A `None`
+    threshold reports its number without gating on it; with all three None the
+    check carries `pass: None` and cannot fail the run.
+    """
+    refs = [r["ref"] for r in predictions]
+    hyps = [r["hyp"] for r in predictions]
+    counts = [char_counts(r, h) for r, h in zip(refs, hyps)]
+    lo, hi = bootstrap_ci(counts)
+    retention = english_token_retention(refs, hyps)
+
+    with_loanword = [r for r in predictions if foreign_token_counts(r["ref"])]
+    without = [r for r in predictions if not foreign_token_counts(r["ref"])]
+
+    result = {
+        "cer": rate(counts), "ci": [lo, hi], "n_segments": len(predictions),
+        "retention": retention["retention"], "n_candidates": retention["n_candidates"],
+        "missing_loanwords": dict(list(retention["missing"].items())[:15]),
+        "n_segments_with_loanword": len(with_loanword),
+        "n_segments_no_loanword": len(without),
+        "cer_with_loanword": score([r["ref"] for r in with_loanword],
+                                    [r["hyp"] for r in with_loanword])["cer"]
+                              if with_loanword else None,
+        "cer_no_loanword": score([r["ref"] for r in without],
+                                  [r["hyp"] for r in without])["cer"] if without else None,
+    }
+
+    checks = {}
+    if cer_max is not None:
+        result["cer_max"] = cer_max
+        checks["cer_pass"] = result["cer"] <= cer_max
+    if retention_min is not None:
+        result["retention_min"] = retention_min
+        # A set with no loanword candidates cannot answer the question the floor
+        # asks; that is a wrong benchmark, not a passing candidate.
+        if result["retention"] is None:
+            raise ValueError(
+                "gates.cross_domain_retention_min is set but data.cross_domain_path has "
+                "no non-Vietnamese-shaped reference tokens to measure retention on")
+        checks["retention_pass"] = result["retention"] >= retention_min
+    if no_loanword_cer_max is not None:
+        result["no_loanword_cer_max"] = no_loanword_cer_max
+        if result["cer_no_loanword"] is None:
+            raise ValueError(
+                "gates.cross_domain_no_loanword_cer_max is set but every segment in "
+                "data.cross_domain_path carries a loanword -- nothing to measure")
+        checks["no_loanword_cer_pass"] = result["cer_no_loanword"] <= no_loanword_cer_max
+
+    result.update(checks)
+    result["pass"] = all(checks.values()) if checks else None
+    return result
+
+
 def _parent_segment_id(segment_id: str) -> str:
     """`seg_0000` or `seg_0000_3` (scripts/ingest_real_bench.py naming) -> `seg_0000`."""
     m = re.match(r"(seg_\d{4})(?:_\d+)?$", segment_id)
@@ -251,7 +331,8 @@ def _load_char_counts_from_predictions(csv_path: Path) -> list:
 
 def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseline: dict,
              baseline_real_csv: str | Path | None = None,
-             baseline_test_csv: str | Path | None = None) -> dict:
+             baseline_test_csv: str | Path | None = None,
+             cross_domain_ds=None) -> dict:
     """cfg: src.config.Config. `baseline` is metrics/baseline.json's parsed dict
     (cer_test, cer_ood, cer_real -- all computed once at Stage 1, never
     recomputed here -- PROJECT_CORE.md §2.1 invariant 3). `results["_predictions"]`
@@ -263,7 +344,10 @@ def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseli
     `baseline_test_csv`: path to baseline stage's `audit/predictions_baseline_test.csv`,
     used for tier1_in_domain's `by_source` breakdown (module docstring) -- optional,
     `by_source` entries note SKIPPED if not given or a slice's segment count doesn't
-    match."""
+    match.
+    `cross_domain_ds`: `data.cross_domain_path` as a ManifestDataset -- optional,
+    the `cross_domain_bench` check notes it was not configured if absent
+    (`score_cross_domain`)."""
     results = {}
     predictions = {}
 
@@ -365,6 +449,20 @@ def run_gate(cfg, model, processor, normalizer, test_ds, ood_ds, real_ds, baseli
             }
     else:
         results["tier4a_real"] = {"pass": None, "note": "real_bench_path not configured"}
+
+    if cross_domain_ds is not None:
+        cross_metrics = _eval_split(model, processor, cross_domain_ds, normalizer, cfg.eval,
+                                     desc="gate:cross_domain_bench")
+        predictions["cross_domain_bench"] = cross_metrics.pop("_predictions")
+        results["cross_domain_bench"] = score_cross_domain(
+            predictions["cross_domain_bench"],
+            cer_max=cfg.gates.cross_domain_cer_max,
+            retention_min=cfg.gates.cross_domain_retention_min,
+            no_loanword_cer_max=cfg.gates.cross_domain_no_loanword_cer_max,
+        )
+    else:
+        results["cross_domain_bench"] = {"pass": None,
+                                          "note": "cross_domain_path not configured"}
 
     results["overall_pass"] = all(
         t.get("pass") is not False for t in results.values() if isinstance(t, dict)

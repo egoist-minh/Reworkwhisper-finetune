@@ -69,6 +69,22 @@ def score(refs: list[str], hyps: list[str]) -> dict:
     }
 
 
+def foreign_token_counts(text: str):
+    """Multiset of the text's non-Vietnamese-shaped tokens -- `len > 1`,
+    `isalpha()`, failing the Vietnamese syllable-shape test. The single
+    definition of "loanword candidate" in this repo: `english_token_retention`
+    scores against it and `src.gate` slices segments by whether it is empty,
+    so the retention number and the with/without-loanword CER split cannot
+    drift apart. `text` must already be normalized.
+    """
+    from collections import Counter
+
+    from src.normalize import is_vietnamese_shaped
+
+    return Counter(t for t in text.split()
+                   if len(t) > 1 and t.isalpha() and not is_vietnamese_shaped(t))
+
+
 def english_token_retention(refs: list[str], hyps: list[str]) -> dict:
     """Share of the reference's non-Vietnamese-shaped tokens the hypothesis
     reproduces verbatim, corpus-level (sum retained / sum candidates).
@@ -102,13 +118,10 @@ def english_token_retention(refs: list[str], hyps: list[str]) -> dict:
 
     from collections import Counter
 
-    from src.normalize import is_vietnamese_shaped
-
     n_candidates = n_retained = 0
     missing: Counter = Counter()
     for ref, hyp in zip(refs, hyps):
-        cands = Counter(t for t in ref.split()
-                        if len(t) > 1 and t.isalpha() and not is_vietnamese_shaped(t))
+        cands = foreign_token_counts(ref)
         if not cands:
             continue
         present = Counter(hyp.split())

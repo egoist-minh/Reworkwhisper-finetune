@@ -5,8 +5,10 @@ CSV for the paired baseline-vs-candidate comparison. No model/GPU needed."""
 import csv
 from pathlib import Path
 
+import pytest
+
 from src.gate import (_score_by_meeting, _load_char_counts_from_predictions,
-                       rejoin_real_chunks, score_real,
+                       rejoin_real_chunks, score_real, score_cross_domain,
                        _meeting_to_source, _score_by_source)
 
 
@@ -248,3 +250,118 @@ def test_score_by_source_omits_retention_pass_when_threshold_not_given():
     result = _score_by_source(predictions, {"m1": "synthetic"}, baseline_rows)
     assert "retention" in result["synthetic"]
     assert "retention_pass" not in result["synthetic"]
+
+
+# ------------------------------------------- cross_domain_bench (v7 plan §2.3)
+
+# Two segments carrying loanwords, one without -- the three numbers the check
+# reports are computed over different slices of the same predictions.
+CROSS_DOMAIN_PREDICTIONS = [
+    {"segment_id": "s0", "meeting_id": "m1", "ref": "chao team", "hyp": "chao tim"},
+    {"segment_id": "s1", "meeting_id": "m1", "ref": "mot build", "hyp": "mot build"},
+    {"segment_id": "s2", "meeting_id": "m1", "ref": "chao ban", "hyp": "chao ban"},
+]
+
+
+def test_score_cross_domain_splits_segments_by_whether_the_reference_has_a_loanword():
+    result = score_cross_domain(CROSS_DOMAIN_PREDICTIONS)
+    assert result["n_segments"] == 3
+    assert result["n_segments_with_loanword"] == 2
+    assert result["n_segments_no_loanword"] == 1
+    assert result["cer_no_loanword"] == 0.0
+    assert result["retention"] == 0.5      # "build" kept, "team" lost
+
+
+def test_score_cross_domain_with_no_thresholds_reports_without_gating():
+    result = score_cross_domain(CROSS_DOMAIN_PREDICTIONS)
+    assert result["pass"] is None
+    assert "cer_pass" not in result
+
+
+def test_score_cross_domain_fails_on_cer_and_on_retention_independently():
+    lenient_cer = score_cross_domain(CROSS_DOMAIN_PREDICTIONS, cer_max=1.0,
+                                      retention_min=0.9)
+    assert lenient_cer["cer_pass"] is True
+    assert lenient_cer["retention_pass"] is False
+    assert lenient_cer["pass"] is False
+
+    lenient_retention = score_cross_domain(CROSS_DOMAIN_PREDICTIONS, cer_max=0.0,
+                                            retention_min=0.4)
+    assert lenient_retention["cer_pass"] is False
+    assert lenient_retention["retention_pass"] is True
+    assert lenient_retention["pass"] is False
+
+
+def test_score_cross_domain_no_loanword_cer_catches_the_opposite_failure():
+    # A candidate that keeps every loanword but wrecks the plain Vietnamese
+    # segments passes CER-with-loanwords and retention, and must still fail.
+    predictions = [
+        {"segment_id": "s0", "meeting_id": "m1", "ref": "chao team", "hyp": "chao team"},
+        {"segment_id": "s1", "meeting_id": "m1", "ref": "chao ban", "hyp": "xxxx xxx"},
+    ]
+    result = score_cross_domain(predictions, cer_max=1.0, retention_min=0.5,
+                                 no_loanword_cer_max=0.0586)
+    assert result["retention_pass"] is True
+    assert result["no_loanword_cer_pass"] is False
+    assert result["pass"] is False
+
+
+def test_score_cross_domain_passes_when_every_set_threshold_is_met():
+    result = score_cross_domain(CROSS_DOMAIN_PREDICTIONS, cer_max=1.0, retention_min=0.5,
+                                 no_loanword_cer_max=0.1)
+    assert result["pass"] is True
+
+
+def test_score_cross_domain_refuses_a_retention_floor_it_cannot_measure():
+    # No non-Vietnamese-shaped reference token anywhere: the threshold has
+    # nothing to answer, which is a wrong benchmark rather than a pass.
+    predictions = [{"segment_id": "s0", "meeting_id": "m1", "ref": "chao ban", "hyp": "chao ban"}]
+    with pytest.raises(ValueError, match="cross_domain_retention_min"):
+        score_cross_domain(predictions, retention_min=0.666)
+
+
+def test_score_cross_domain_refuses_a_no_loanword_bound_it_cannot_measure():
+    predictions = [{"segment_id": "s0", "meeting_id": "m1", "ref": "chao team", "hyp": "chao team"}]
+    with pytest.raises(ValueError, match="cross_domain_no_loanword_cer_max"):
+        score_cross_domain(predictions, no_loanword_cer_max=0.0586)
+
+
+# The acceptance criterion docs/v6-curriculum-plan.md §2.3 states for this check:
+# it must FAIL on the adapter that already exists. Scored from the v6 and v5
+# hypotheses recorded by the cross-domain benchmark run, so it needs no GPU --
+# but those artifacts are untracked (Outputs/ is gitignored), hence the skip.
+_BENCH = Path("Outputs/bench-cross-v6")
+_V5_THRESHOLDS = {"cer_max": 0.0819, "retention_min": 0.666}
+
+
+def _bench_predictions(name: str) -> list[dict]:
+    import json
+
+    from src.normalize import Normalizer
+
+    normalizer = Normalizer(strip_punctuation=True, lowercase=True,
+                             number_convention="word_to_digit",
+                             filler_tokens=["ừm", "ờm", "ehm", "uhm", "hmm"])
+    path = _BENCH / f"{name}.cross-domain.persegment.jsonl"
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    return [{"segment_id": r["segment_id"], "meeting_id": r["group_id"],
+             "ref": normalizer(r["ref"]), "hyp": normalizer(r["hyp"])} for r in rows]
+
+
+@pytest.mark.skipif(not _BENCH.is_dir(), reason="Outputs/bench-cross-v6 not on this machine")
+def test_cross_domain_check_fails_the_v6_adapter_it_was_written_for():
+    result = score_cross_domain(_bench_predictions("rework_whisper_v6"), **_V5_THRESHOLDS)
+    assert result["n_segments"] == 299
+    assert result["cer_pass"] is False        # 10.85% against an 8.19% bound
+    assert result["retention_pass"] is False  # 48.6% against a 66.6% floor
+    assert result["pass"] is False
+
+
+@pytest.mark.skipif(not _BENCH.is_dir(), reason="Outputs/bench-cross-v6 not on this machine")
+def test_cross_domain_check_passes_the_v5_adapter_the_thresholds_came_from():
+    # Same thresholds, same audio: the adapter in production must clear its own
+    # numbers, or the bounds are transcribed wrong.
+    result = score_cross_domain(_bench_predictions("winhsss_reworkwhisper_large_v5"),
+                                 **_V5_THRESHOLDS)
+    assert result["cer_pass"] is True
+    assert result["retention_pass"] is True

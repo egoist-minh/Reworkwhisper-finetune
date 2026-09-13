@@ -27,6 +27,10 @@ data:
   # is in scope for this deadline -- not optional.
   real_bench_path: dataset/real-meetings-bench
   real_clip_path: null                # optional; null = skip
+  # dataset/cross-domain-bench.zip: 299 segments / 1.30 h of real YouTube audio from
+  # 3 meetings outside every training corpus, at 7.4% loanword density. null = the
+  # gates.cross_domain_* check does not run.
+  cross_domain_path: null
   # split=demo is 4520 segments (4270 train + 250 val carved out below); test is 426
   # segments from dot2's paid_meeting_test_0001-0003, using 10 voices with ZERO overlap
   # with the 10 fixed train voices -- unlike the old test set, this is a genuine
@@ -74,6 +78,11 @@ training:
   val_limit: null                     # cap only the in-training val/ood eval sets; train stays
                                        # full. val is re-decoded every eval round and grows with
                                        # the corpus; sweep-gate still uses the full split
+  init_adapter: null                  # continue from an existing PEFT adapter instead of a
+                                       # fresh LoRA (curriculum phase 2). Point it at an
+                                       # UNSCALED adapter -- outputs/<run>/checkpoints/best,
+                                       # never outputs/<run>/adapter (lambda is baked into
+                                       # that one). cfg.lora is ignored when this is set
   eval_steps: null                    # eval + checkpoint every N steps; null = once per epoch.
                                        # Set it on any 1-epoch run: "epoch" then means a single
                                        # eval after the last step, no CER row while training is
@@ -85,6 +94,11 @@ sweep:
   lambdas: [0.0, 0.25, 0.5, 0.75, 1.0]
   ood_cer_budget: 0.02                # hard budget; no lambda within it => fail, no fallback
   elbow_ratio_threshold: 10.0         # cost/benefit stop rule (SESSIONS.md E2), see src/config.py
+  retention_floor: null               # min english_token_retention on val for a lambda to be
+                                       # eligible, applied before the elbow walk; null = no floor.
+                                       # val is in-corpus so this number is inflated by
+                                       # memorisation -- the real out-of-corpus bound is
+                                       # gates.cross_domain_retention_min
 
 # Eval gate thresholds -- only tiers 1, 2, 4a are in scope for the first run.
 # Tier 3 (RTF) dropped, tier 4b (long-form) deferred (deadline scope cut).
@@ -93,6 +107,12 @@ gates:
   real_cer_regression_pp: 0.0         # tier 4a: CER_real must not regress vs base
   max_retention_regression_pp: 0.0    # tier1 by_source: english_token_retention must not
                                        # drop vs baseline on the same source slice (H4b)
+  # Absolute bounds on data.cross_domain_path, all null = report only, never fail.
+  # docs/v6-curriculum-plan.md §5 sets them to the published v5 adapter's measured
+  # numbers: 0.0819 CER, 0.666 retention, 0.0586 no-loanword CER.
+  cross_domain_cer_max: null
+  cross_domain_retention_min: null
+  cross_domain_no_loanword_cer_max: null
 
 hub:
   push: false

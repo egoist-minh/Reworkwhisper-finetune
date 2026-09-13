@@ -23,6 +23,11 @@ class Data:
     ood_eval_path: str | None = None
     real_bench_path: str | None = None
     real_clip_path: str | None = None
+    # Out-of-corpus real audio carrying loanwords at the density the production
+    # traffic has (dataset/cross-domain-bench). Separate from real_bench_path:
+    # that one is ML-talk audio with almost no code-switching, so it cannot see
+    # a loanword regression. Null = the cross-domain check does not run.
+    cross_domain_path: str | None = None
     val_meetings: list[str] = field(default_factory=list)
 
 
@@ -74,6 +79,14 @@ class Training:
     eval_steps: int | None = None   # eval + checkpoint every N steps. null = once per
                                 # epoch, which on a 1-epoch run means a single eval at
                                 # the very end and no recoverable checkpoint before it.
+    init_adapter: str | None = None   # continue training from an existing PEFT adapter
+                                # directory instead of injecting a fresh LoRA (curriculum
+                                # phase 2, docs/v6-curriculum-plan.md). rank/alpha/
+                                # target_modules then come from that adapter and cfg.lora
+                                # is ignored. Must be an UNSCALED adapter --
+                                # checkpoints/best/, never an outputs/*/adapter/ that
+                                # src/lora.py:save_with_lambda baked a lambda into.
+                                # null = fresh LoRA from cfg.lora.
 
 
 @dataclass
@@ -86,6 +99,13 @@ class Sweep:
     # ~8.9x step-to-step ratio jump seen at lambda=0.5 (accepted) from the
     # ~12.6x jump at lambda=0.75 (rejected) on v3-r16's own sweep data.
     elbow_ratio_threshold: float = 10.0
+    # Minimum english_token_retention on the VAL split a lambda must hold to be
+    # eligible at all, applied before the elbow walk. v6-corpus-r32's sweep chose
+    # lambda=0.5 with nothing watching retention, and shipped a 48.6% cross-domain
+    # retention against v5's 66.6%. null = no floor (previous behaviour). Note the
+    # floor is measured on val, which is in-corpus and therefore inflated by
+    # memorisation -- the out-of-corpus constraint is gates.cross_domain_*.
+    retention_floor: float | None = None
 
 
 @dataclass
@@ -98,6 +118,16 @@ class Gates:
     max_retention_regression_pp: float = 0.0  # tier1 by_source: english_token_retention must
                                                # not drop more than this (absolute) vs baseline
                                                # on the same source slice (H4b, SESSIONS.md H6)
+    # cross-domain check (data.cross_domain_path). Absolute bounds against the
+    # published v5 adapter's measured numbers, not a relative improvement rule:
+    # this set is out-of-corpus, so there is no per-run baseline that means
+    # anything. All three null by default = the check reports but never fails.
+    cross_domain_cer_max: float | None = None
+    cross_domain_retention_min: float | None = None
+    # CER over the segments whose reference carries NO loanword. Insurance, not
+    # a target: it fails a candidate that fixed its loanword prior by giving
+    # back the Vietnamese modelling the big corpus bought.
+    cross_domain_no_loanword_cer_max: float | None = None
 
 
 @dataclass
@@ -172,6 +202,17 @@ def validate(cfg: Config) -> None:
         raise ValueError("training.limit must be a positive int or null")
     if cfg.training.eval_steps is not None and cfg.training.eval_steps <= 0:
         raise ValueError("training.eval_steps must be a positive int or null")
+    # Fail here rather than after a model download: a mistyped adapter path is
+    # otherwise only discovered once train() is already holding the base model.
+    if cfg.training.init_adapter is not None:
+        adapter_cfg = Path(cfg.training.init_adapter) / "adapter_config.json"
+        if not adapter_cfg.is_file():
+            raise ValueError(
+                f"training.init_adapter={cfg.training.init_adapter!r} has no "
+                f"{adapter_cfg.name} -- point it at a PEFT adapter directory "
+                "(checkpoints/best/, not an adapter/ that save_with_lambda wrote)")
+    if cfg.sweep.retention_floor is not None and not (0.0 <= cfg.sweep.retention_floor <= 1.0):
+        raise ValueError("sweep.retention_floor must be a fraction in [0, 1] or null")
     # PyYAML is YAML 1.1: a float literal needs a decimal point, so
     # `--override training.learning_rate=5e-05` resolves to the *string* "5e-05"
     # and nothing catches it until AdamW compares it to a float, ~200 frames into
@@ -186,6 +227,17 @@ def validate(cfg: Config) -> None:
     if not cfg.sweep.lambdas:
         raise ValueError("sweep.lambdas is empty -- there is nothing to select from")
 
+    # A threshold with nothing to measure it on would silently never run.
+    cross_domain_gates = {
+        n: getattr(cfg.gates, n) for n in
+        ("cross_domain_cer_max", "cross_domain_retention_min",
+         "cross_domain_no_loanword_cer_max")
+    }
+    set_gates = sorted(n for n, v in cross_domain_gates.items() if v is not None)
+    if set_gates and not cfg.data.cross_domain_path:
+        raise ValueError(f"gates {set_gates} are set but data.cross_domain_path is null -- "
+                         "the check would never run")
+
     # Without an OOD set there is no forgetting measurement at all (tier 2 is the
     # only one) and every sweep row's ood_cer is None, so select_lambda finds no
     # budget-safe lambda and hard-fails -- but only AFTER training and five val
@@ -199,7 +251,7 @@ def validate(cfg: Config) -> None:
 
     # Tier-4 leak guard: the real benchmark must never be reachable as training data.
     ds = Path(cfg.data.dataset_path).resolve()
-    for name in ("real_bench_path", "real_clip_path"):
+    for name in ("real_bench_path", "real_clip_path", "cross_domain_path"):
         p = getattr(cfg.data, name)
         if not p:
             continue

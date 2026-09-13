@@ -187,6 +187,32 @@ def _schedule_kwargs(eval_steps: int | None, total_steps: int) -> dict:
     }
 
 
+def _attach_adapter(cfg, base_model):
+    """Fresh LoRA from cfg.lora, or continue training the adapter at
+    cfg.training.init_adapter (curriculum phase 2, docs/v6-curriculum-plan.md).
+
+    `is_trainable=True` is what separates this from every other
+    PeftModel.from_pretrained call in the repo: the default loads an adapter for
+    inference with requires_grad=False on every LoRA weight, which trains nothing
+    and reports 0 trainable parameters rather than raising.
+
+    rank, alpha and target_modules then come from the loaded adapter_config.json;
+    cfg.lora is not consulted at all, so a run continuing a rank-32 adapter stays
+    rank 32 whatever cfg.lora.rank says. Printed rather than silently ignored.
+    """
+    from peft import PeftModel, get_peft_model
+
+    from src.lora import build_lora_config
+
+    if not cfg.training.init_adapter:
+        return get_peft_model(base_model, build_lora_config(cfg))
+
+    print(f"init_adapter: continuing from {cfg.training.init_adapter} -- LoRA rank/alpha/"
+          f"target_modules come from that adapter, cfg.lora (rank={cfg.lora.rank}, "
+          f"alpha={cfg.lora.alpha}) is ignored")
+    return PeftModel.from_pretrained(base_model, cfg.training.init_adapter, is_trainable=True)
+
+
 def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path,
           resume: bool = False):
     """cfg: src.config.Config. Returns the path to checkpoints/best/.
@@ -201,9 +227,6 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path,
     from transformers import (Seq2SeqTrainer, Seq2SeqTrainingArguments,
                                WhisperProcessor, TrainerCallback)
     from transformers.trainer_callback import PrinterCallback
-    from peft import get_peft_model
-
-    from src.lora import build_lora_config
 
     out = Path(out_dir)
     train_dtype = pick_dtype() if torch.cuda.is_available() else torch.float32
@@ -219,7 +242,7 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path,
         warmup_kwargs = {"warmup_steps": round(cfg.training.warmup_ratio * total_steps)}
     schedule_kwargs = _schedule_kwargs(cfg.training.eval_steps, total_steps)
     processor = WhisperProcessor.from_pretrained(cfg.base_model)
-    model = get_peft_model(base_model, build_lora_config(cfg))
+    model = _attach_adapter(cfg, base_model)
     model.print_trainable_parameters()
     if cfg.training.gradient_checkpointing:
         # Base model is entirely frozen except the adapter, so the graph's input

@@ -6,6 +6,7 @@ why this replaced transformers' built-in EarlyStoppingCallback."""
 import pytest
 
 from src.train import (
+    _attach_adapter,
     _EarlyStoppingState,
     _eval_val_cer_history,
     _latest_checkpoint,
@@ -194,3 +195,77 @@ def test_replay_restores_the_patience_counter_exactly():
     s.replay([0.30, 0.20, 0.25, 0.26])
     assert s.rounds_without_improvement == 2
     assert s.update(0.27) is True   # third round without improvement
+
+
+# --------------------------------------- _attach_adapter (curriculum phase 2)
+# peft/torch are not installed on the machine these tests run on, so the branch
+# is exercised against a stub module -- what matters here is WHICH call is made
+# and with which arguments, not what peft does with them.
+
+
+class _StubPeft:
+    def __init__(self):
+        self.calls = []
+
+    def get_peft_model(self, base_model, lora_config):
+        self.calls.append(("get_peft_model", lora_config))
+        return "fresh-lora"
+
+    class PeftModel:
+        calls: list = []
+
+        @classmethod
+        def from_pretrained(cls, base_model, path, **kwargs):
+            cls.calls.append((path, kwargs))
+            return "continued-adapter"
+
+
+@pytest.fixture
+def stub_peft(monkeypatch):
+    import sys
+    import types
+
+    stub = _StubPeft()
+    module = types.ModuleType("peft")
+    module.get_peft_model = stub.get_peft_model
+    module.PeftModel = _StubPeft.PeftModel
+    module.LoraConfig = lambda **kw: kw
+    module.TaskType = types.SimpleNamespace(SEQ_2_SEQ_LM="SEQ_2_SEQ_LM")
+    _StubPeft.PeftModel.calls = []
+    monkeypatch.setitem(sys.modules, "peft", module)
+    return stub
+
+
+def _cfg(init_adapter=None, rank=16, alpha=32):
+    from src.config import Config, Data, Lora, Training
+
+    return Config(run_id="t", base_model="m", data=Data(dataset_path="d", ood_eval_path="o"),
+                  lora=Lora(rank=rank, alpha=alpha),
+                  training=Training(init_adapter=init_adapter))
+
+
+def test_attach_adapter_injects_a_fresh_lora_when_init_adapter_is_unset(stub_peft):
+    assert _attach_adapter(_cfg(), base_model="base") == "fresh-lora"
+    (_, lora_config), = stub_peft.calls
+    assert lora_config["r"] == 16
+
+
+def test_attach_adapter_continues_an_existing_adapter_as_trainable(stub_peft):
+    # is_trainable=True is the whole point: the default load freezes every LoRA
+    # weight, which trains nothing and reports zero trainable parameters rather
+    # than raising.
+    assert _attach_adapter(_cfg(init_adapter="outputs/v6/checkpoints/best"),
+                           base_model="base") == "continued-adapter"
+    (path, kwargs), = _StubPeft.PeftModel.calls
+    assert path == "outputs/v6/checkpoints/best"
+    assert kwargs == {"is_trainable": True}
+    assert stub_peft.calls == []  # no fresh LoRA built
+
+
+def test_attach_adapter_says_out_loud_that_cfg_lora_is_ignored(stub_peft, capsys):
+    # The loaded adapter's rank wins over cfg.lora.rank silently otherwise -- a
+    # phase-2 run continuing a rank-32 adapter stays rank 32 whatever the config
+    # says, and the frozen config.json will still record rank 16.
+    _attach_adapter(_cfg(init_adapter="outputs/v6/checkpoints/best", rank=16), base_model="base")
+    out = capsys.readouterr().out
+    assert "cfg.lora" in out and "ignored" in out
