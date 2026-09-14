@@ -132,8 +132,11 @@ That's the predecessor repo — real git history, real training runs, real evide
 
 Cách chạy hiện tại là thuê một máy GPU theo giờ và chạy `src/pipeline.py` qua SSH — không
 phải Kaggle. Toàn bộ quy trình, từ sửa IP tới chép kết quả về, nằm trong
-**`docs/server-finetune.md`**; đọc file đó trước khi gõ lệnh. Bốn điều hay quên nhất:
+**`docs/server-finetune.md`**; đọc file đó trước khi gõ lệnh. Sáu điều hay quên nhất:
 
+- **Train trên `v6-corpus` thì chạy `scripts/select_val_meetings.py` trước** (§3b của
+  runbook) và thêm `data.val_meetings` nó in ra vào `$OV`. Val mặc định chỉ 0,79 h nên
+  ValCER trồi sụt vài điểm giữa các lượt eval, không đọc được xu hướng.
 - **IP đổi mỗi lần thuê.** Host `speech-agent-gpu` trong `~/.ssh/config` trỏ tới lần thuê
   trước. Hỏi người dùng IP mới, sửa `HostName`, rồi khảo sát máy — đừng giả định phần cứng.
 - **`pip install torch` hay lấy sai bản CUDA** so với driver trên máy. Kiểm

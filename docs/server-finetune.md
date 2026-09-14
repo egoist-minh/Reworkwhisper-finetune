@@ -98,6 +98,30 @@ trên chính bộ này:
 PYTHONPATH=. .venv/bin/python scripts/fetch_vivos.py --out dataset/vivos   # 760 segment, ~45 s
 ```
 
+## 3b. Trước khi train trên v6-corpus: mở rộng val
+
+`v6-corpus` val chỉ 365 seg / 0,79 h — quá nhỏ, ValCER trồi sụt mạnh giữa các lượt
+eval (5,91% → 7,65% → 4,65% trong `Outputs/v6-corpus-r32.run.log`). Train/val không
+cố định trong file corpus — `src.data.resolve_splits` tự tách từ `data.val_meetings`
+lúc load, nên không cần build lại hay đẩy lại corpus lên HF, chỉ cần đổi
+`data.val_meetings`. Sau khi tar `dataset/v6-corpus` đã giải nén xong ở §3:
+
+```bash
+PYTHONPATH=. .venv/bin/python -m scripts.select_val_meetings \
+  --dataset dataset/v6-corpus --target-hours 3.0
+```
+
+In ra danh sách meeting nên thêm vào val (loại sẵn meeting nào còn chung voice_id với
+train — tránh lặp lại lỗi rò rỉ giọng hiện có ở 4 meeting val cũ) và dòng dùng ngay:
+
+```
+--override data.val_meetings=[paid_meeting_0001,paid_meeting_0002,paid_meeting_0011,rCd8DSMk3-c,<meeting mới>,...]
+```
+
+Thêm dòng đó vào `$OV` ở §4 trước khi chạy `--stage baseline`/`--stage train`. Nếu
+script in `WARNING` thiếu giờ ở một loại nguồn (synthetic/youtube) — báo lại cho
+người dùng, đừng tự ý hạ `--target-hours` để né cảnh báo.
+
 ## 4. Chạy
 
 Tham số đã chốt cho v6. Đặt thành biến rồi dùng cho cả hai stage — baseline và train **phải**
