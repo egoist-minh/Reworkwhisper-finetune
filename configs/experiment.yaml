@@ -30,7 +30,9 @@ data:
   # dataset/cross-domain-bench.zip: 299 segments / 1.30 h of real YouTube audio from
   # 3 meetings outside every training corpus, at 7.4% loanword density. null = the
   # gates.cross_domain_* check does not run.
-  cross_domain_path: null
+  # Set together with gates.cross_domain_* below -- src/config.py:validate refuses
+  # those thresholds while this is null, since the check would never run.
+  cross_domain_path: dataset/cross-domain-bench
   # split=demo is 4520 segments (4270 train + 250 val carved out below); test is 426
   # segments from dot2's paid_meeting_test_0001-0003, using 10 voices with ZERO overlap
   # with the 10 fixed train voices -- unlike the old test set, this is a genuine
