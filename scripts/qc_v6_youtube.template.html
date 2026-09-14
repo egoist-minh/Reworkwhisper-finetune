@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8">
+<title>Soát chất lượng YouTube — v6-corpus</title>
+<style>
+  :root { --line:#d8d8d4; --muted:#6b6b66; --bg:#faf9f7; --card:#fff; --accent:#2f5d8a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:#1c1c1a; }
+  header { position:sticky; top:0; z-index:5; background:var(--card); border-bottom:1px solid var(--line); padding:10px 16px; }
+  h1 { font-size:16px; margin:0 0 6px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .muted { color:var(--muted); }
+  button, select, input[type=text] { font:inherit; padding:5px 9px; border:1px solid var(--line); border-radius:5px; background:var(--card); }
+  button { cursor:pointer; }
+  button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  nav button { border-radius:5px 5px 0 0; }
+  main { padding:16px; }
+  table { border-collapse:collapse; width:100%; font-size:13px; background:var(--card); }
+  th, td { border:1px solid var(--line); padding:5px 8px; text-align:right; white-space:nowrap; }
+  th { background:#f1f0ec; position:sticky; top:0; }
+  td.l, th.l { text-align:left; }
+  .warn { background:#fdeaea; }
+  .wrap { display:grid; grid-template-columns:340px 1fr; gap:14px; align-items:start; }
+  #list { max-height:72vh; overflow:auto; border:1px solid var(--line); background:var(--card); border-radius:6px; }
+  .item { padding:6px 9px; border-bottom:1px solid #eee; cursor:pointer; font-size:12.5px; }
+  .item:hover { background:#f3f6fa; }
+  .item.sel { background:#e5edf6; }
+  .item .txt { color:#333; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .detail { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:14px; }
+  .detail .seg-text { font-size:17px; line-height:1.7; margin:10px 0; white-space:pre-wrap; }
+  audio { width:100%; margin:6px 0; }
+  .tag { display:inline-block; background:#efece4; border-radius:10px; padding:1px 8px; font-size:11.5px; margin:2px 3px 2px 0; }
+  .tag.bad { background:#f6dcdc; }
+  .v-dat { color:#1d6b3a; } .v-sai { color:#a4292b; } .v-bo { color:#8a5a00; }
+  textarea { width:100%; min-height:64px; font:inherit; padding:6px; border:1px solid var(--line); border-radius:5px; }
+  .hide { display:none; }
+</style></head>
+<body>
+<header>
+  <h1>Soát chất lượng phần YouTube đi vào train — <span class="muted">dataset/v6-corpus</span></h1>
+  <div class="row">
+    <nav class="row"><button id="tab-tong" class="on">Tổng quan</button><button id="tab-nghe">Nghe &amp; chấm</button></nav>
+    <span class="muted" id="hdr-stats"></span>
+    <span style="flex:1"></span>
+    <input type="text" id="reviewer" placeholder="tên người soát" size="16">
+    <span id="progress" class="muted"></span>
+    <button id="export">Xuất JSONL</button>
+    <button id="reset">Xoá kết quả chấm</button>
+  </div>
+</header>
+
+<main>
+<section id="view-tong">
+  <p class="muted">Cờ gắn theo luật trong <code>scripts/qc_v6_youtube.py</code>; cờ không phải lỗi, chỉ là chỗ đáng nghe lại.</p>
+  <table id="flag-table"></table>
+  <h2 style="font-size:15px">Theo cuộc họp</h2>
+  <div style="max-height:60vh; overflow:auto"><table id="meeting-table"></table></div>
+</section>
+
+<section id="view-nghe" class="hide">
+  <div class="row" style="margin-bottom:10px">
+    <select id="f-meeting"></select>
+    <select id="f-flag"></select>
+    <select id="f-verdict">
+      <option value="">mọi trạng thái chấm</option>
+      <option value="chua">chưa chấm</option>
+      <option value="dat">đạt</option>
+      <option value="sai">sai nhãn</option>
+      <option value="bo">loại bỏ</option>
+    </select>
+    <button id="f-shuffle">Trộn ngẫu nhiên</button>
+    <span class="muted" id="f-count"></span>
+  </div>
+  <div class="wrap">
+    <div id="list"></div>
+    <div class="detail" id="detail"><p class="muted">Chọn một đoạn bên trái, hoặc bấm J.</p></div>
+  </div>
+  <p class="muted" style="margin-top:10px">Phím tắt: <b>J</b>/<b>K</b> đoạn sau/trước · <b>Space</b> phát/dừng · <b>R</b> nghe lại · <b>1</b> đạt · <b>2</b> sai nhãn · <b>3</b> loại bỏ</p>
+</section>
+</main>
+
+<script id="payload" type="application/json">/*__PAYLOAD__*/null</script>
+<script>
+const DATA = JSON.parse(document.getElementById("payload").textContent);
+const SEGS = DATA.segments;
+SEGS.forEach((s, i) => { s.i = i; s.key = s.m + "/" + s.s; });
+const LABELS = DATA.flag_labels;
+const STORE = "qc-v6-youtube";
+let marks = {};
+try { marks = JSON.parse(localStorage.getItem(STORE) || "{}"); } catch (e) { marks = {}; }
+const saveMarks = () => { try { localStorage.setItem(STORE, JSON.stringify(marks)); } catch (e) {} };
+
+const fmtH = sec => (sec / 3600).toFixed(2) + " h";
+const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* ---------- Tổng quan ---------- */
+const flagTotals = {};
+Object.keys(LABELS).forEach(f => flagTotals[f] = 0);
+SEGS.forEach(s => s.f.forEach(f => flagTotals[f]++));
+const totalSec = SEGS.reduce((a, s) => a + s.d, 0);
+document.getElementById("hdr-stats").textContent =
+  SEGS.length + " đoạn · " + DATA.meetings.length + " cuộc họp · " + fmtH(totalSec);
+
+document.getElementById("flag-table").innerHTML =
+  "<tr><th class='l'>Cờ</th><th>Số đoạn</th><th>% bộ</th></tr>" +
+  Object.keys(LABELS).sort((a, b) => flagTotals[b] - flagTotals[a]).map(f =>
+    "<tr><td class='l'>" + LABELS[f] + "</td><td>" + flagTotals[f] + "</td><td>" +
+    (100 * flagTotals[f] / SEGS.length).toFixed(1) + "%</td></tr>").join("");
+
+const mFlagCols = ["chua_soat", "chi_soat_text", "may_soat", "text_rong", "text_thua_thoi",
+                   "lap_tu", "trung_lap", "co_chu_hoa", "co_chu_so", "tu_ngoai_lai", "overlap"];
+document.getElementById("meeting-table").innerHTML =
+  "<tr><th class='l'>Cuộc họp</th><th>Đoạn</th><th>Giờ</th><th class='l'>Người soát</th>" +
+  mFlagCols.map(f => "<th>" + LABELS[f] + "</th>").join("") + "</tr>" +
+  DATA.meetings.slice().sort((a, b) => b.n - a.n).map(m => {
+    const who = Object.entries(m.reviewers).sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => k + (v < m.n ? " (" + v + ")" : "")).join(", ");
+    return "<tr><td class='l'>" + esc(m.id) + "</td><td>" + m.n + "</td><td>" +
+      (m.sec / 3600).toFixed(2) + "</td>" +
+      "<td class='l" + (m.verified === 0 ? " warn" : "") + "'>" + esc(who) + "</td>" +
+      mFlagCols.map(f => {
+        const n = m.flags[f] || 0;
+        return "<td class='" + (n / m.n > 0.5 ? "warn" : "") + "'>" + (n || "") + "</td>";
+      }).join("") + "</tr>";
+  }).join("");
+
+/* ---------- Bộ lọc ---------- */
+const fMeeting = document.getElementById("f-meeting");
+fMeeting.innerHTML = "<option value=''>mọi cuộc họp</option>" +
+  DATA.meetings.map(m => "<option value=\"" + esc(m.id) + "\">" + esc(m.id) + " (" + m.n + ")</option>").join("");
+const fFlag = document.getElementById("f-flag");
+fFlag.innerHTML = "<option value=''>mọi cờ</option><option value='__any__'>có ít nhất một cờ</option>" +
+  Object.keys(LABELS).sort((a, b) => flagTotals[b] - flagTotals[a])
+    .map(f => "<option value='" + f + "'>" + LABELS[f] + " (" + flagTotals[f] + ")</option>").join("");
+
+let shuffled = false, filtered = [], cursor = -1, shown = 0;
+const PAGE = 300;
+
+function applyFilter() {
+  const m = fMeeting.value, f = fFlag.value, v = document.getElementById("f-verdict").value;
+  filtered = SEGS.filter(s => {
+    if (m && s.m !== m) return false;
+    if (f === "__any__" ? s.f.length === 0 : (f && !s.f.includes(f))) return false;
+    if (v && ((marks[s.key] || {}).verdict || "chua") !== v) return false;
+    return true;
+  });
+  if (shuffled) {
+    for (let i = filtered.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = filtered[i]; filtered[i] = filtered[j]; filtered[j] = t;
+    }
+  }
+  document.getElementById("f-count").textContent = filtered.length + " đoạn khớp lọc";
+  shown = 0;
+  cursor = filtered.length ? 0 : -1;
+  renderList();
+  renderDetail();
+}
+
+function verdictMark(key) {
+  const v = (marks[key] || {}).verdict;
+  return v ? "<span class='v-" + v + "'>●</span> " : "";
+}
+
+function renderList(more) {
+  const list = document.getElementById("list");
+  shown = Math.min(filtered.length, more ? shown + PAGE : Math.max(PAGE, Math.min(shown, filtered.length)));
+  while (cursor >= shown && shown < filtered.length) shown = Math.min(filtered.length, shown + PAGE);
+  list.innerHTML = filtered.slice(0, shown).map((s, i) =>
+    "<div class='item" + (i === cursor ? " sel" : "") + "' data-i='" + i + "'>" +
+    "<b>" + verdictMark(s.key) + esc(s.m) + "/" + esc(s.s) + "</b> <span class='muted'>" + s.d + "s" +
+    (s.f.length ? " · " + s.f.length + " cờ" : "") + "</span>" +
+    "<span class='txt'>" + (esc(s.t.slice(0, 90)) || "<i>(rỗng)</i>") + "</span></div>").join("") +
+    (shown < filtered.length
+      ? "<div class='item' id='more' style='text-align:center'>tải thêm " +
+        Math.min(PAGE, filtered.length - shown) + " đoạn…</div>"
+      : "");
+  const sel = list.querySelector(".item.sel");
+  if (sel) sel.scrollIntoView({ block: "nearest" });
+}
+
+document.getElementById("list").addEventListener("click", ev => {
+  const el = ev.target.closest(".item");
+  if (!el) return;
+  if (el.id === "more") { renderList(true); return; }
+  cursor = +el.dataset.i;
+  renderList(); renderDetail(); play();
+});
+
+/* ---------- Chi tiết ---------- */
+function renderDetail() {
+  const d = document.getElementById("detail");
+  if (cursor < 0 || !filtered[cursor]) { d.innerHTML = "<p class='muted'>Không có đoạn nào khớp lọc.</p>"; return; }
+  const s = filtered[cursor];
+  const mk = marks[s.key] || {};
+  d.innerHTML =
+    "<div class='row'><b>" + esc(s.m) + "/" + esc(s.s) + "</b><span class='muted'>" + s.d + "s · " +
+      (cursor + 1) + "/" + filtered.length + "</span>" +
+    (s.u ? "<a href=\"" + esc(s.u) + "&t=" + s.y + "s\" target='_blank'>mở YouTube tại " + s.y + "s</a>" : "") +
+    "<span style='flex:1'></span><span class='muted'>" + (esc(s.r) || "chưa ai soát") + "</span></div>" +
+    "<audio id='player' controls src=\"" + DATA.audio_root + encodeURI(s.a) + "\"></audio>" +
+    "<div>" + (s.f.map(f => "<span class='tag bad'>" + LABELS[f] + "</span>").join("") ||
+               "<span class='tag'>không cờ</span>") + "</div>" +
+    "<div class='seg-text'>" + (esc(s.t) || "<i>(text rỗng)</i>") + "</div>" +
+    "<div class='row'><button data-v='dat' class='" + (mk.verdict === "dat" ? "on" : "") + "'>1 · Đạt</button>" +
+    "<button data-v='sai' class='" + (mk.verdict === "sai" ? "on" : "") + "'>2 · Sai nhãn</button>" +
+    "<button data-v='bo' class='" + (mk.verdict === "bo" ? "on" : "") + "'>3 · Loại bỏ</button>" +
+    "<button id='prev'>← K</button><button id='next'>J →</button></div>" +
+    "<p class='muted' style='margin:10px 0 3px'>Text sửa (để trống nếu không sửa)</p>" +
+    "<textarea id='fix' placeholder=\"" + esc(s.t) + "\">" + esc(mk.fix || "") + "</textarea>" +
+    "<p class='muted' style='margin:8px 0 3px'>Ghi chú</p>" +
+    "<input type='text' id='note' style='width:100%' value=\"" + esc(mk.note || "") + "\">";
+
+  d.querySelectorAll("button[data-v]").forEach(b => b.onclick = () => setVerdict(b.dataset.v));
+  d.querySelector("#prev").onclick = () => move(-1);
+  d.querySelector("#next").onclick = () => move(1);
+  d.querySelector("#fix").onchange = ev => patch(s.key, { fix: ev.target.value.trim() });
+  d.querySelector("#note").onchange = ev => patch(s.key, { note: ev.target.value.trim() });
+}
+
+function patch(key, fields) {
+  marks[key] = Object.assign({}, marks[key], fields, { at: new Date().toISOString() });
+  saveMarks(); updateProgress();
+}
+
+function setVerdict(v) {
+  const s = filtered[cursor];
+  if (!s) return;
+  patch(s.key, { verdict: v });
+  renderList(); renderDetail();
+}
+
+function move(delta) {
+  if (!filtered.length) return;
+  cursor = Math.max(0, Math.min(filtered.length - 1, cursor + delta));
+  renderList(); renderDetail(); play();
+}
+
+function play() { const p = document.getElementById("player"); if (p) p.play().catch(() => {}); }
+
+function updateProgress() {
+  const n = Object.values(marks).filter(m => m.verdict).length;
+  document.getElementById("progress").textContent = "đã chấm " + n;
+}
+
+/* ---------- Phím tắt, tab, xuất ---------- */
+document.addEventListener("keydown", ev => {
+  if (/^(INPUT|TEXTAREA)$/.test(ev.target.tagName)) return;
+  const k = ev.key.toLowerCase();
+  if (k === "j") { move(1); ev.preventDefault(); }
+  else if (k === "k") { move(-1); ev.preventDefault(); }
+  else if (k === "r") { const p = document.getElementById("player"); if (p) { p.currentTime = 0; p.play(); } ev.preventDefault(); }
+  else if (ev.key === " ") { const p = document.getElementById("player"); if (p) { p.paused ? p.play() : p.pause(); } ev.preventDefault(); }
+  else if (ev.key === "1" || ev.key === "2" || ev.key === "3") {
+    setVerdict({ "1": "dat", "2": "sai", "3": "bo" }[ev.key]); ev.preventDefault();
+  }
+});
+
+const tabs = { "tab-tong": "view-tong", "tab-nghe": "view-nghe" };
+Object.keys(tabs).forEach(t => document.getElementById(t).onclick = () => {
+  Object.keys(tabs).forEach(b => {
+    document.getElementById(b).classList.toggle("on", b === t);
+    document.getElementById(tabs[b]).classList.toggle("hide", b !== t);
+  });
+});
+
+[fMeeting, fFlag, document.getElementById("f-verdict")].forEach(el => el.onchange = applyFilter);
+document.getElementById("f-shuffle").onclick = ev => {
+  shuffled = !shuffled;
+  ev.target.classList.toggle("on", shuffled);
+  applyFilter();
+};
+
+document.getElementById("export").onclick = () => {
+  const who = document.getElementById("reviewer").value.trim();
+  const byKey = {}; SEGS.forEach(s => byKey[s.key] = s);
+  const lines = Object.keys(marks).filter(k => marks[k].verdict || marks[k].fix || marks[k].note).map(key => {
+    const s = byKey[key] || {}, m = marks[key];
+    return JSON.stringify({
+      meeting_id: s.m, segment_id: s.s, audio_filepath: s.a, text: s.t, flags: s.f,
+      verdict: m.verdict || "", corrected_text: m.fix || "", note: m.note || "",
+      qc_reviewer: who, qc_date: (m.at || "").slice(0, 10),
+    });
+  });
+  const blob = new Blob([lines.join("\n") + "\n"], { type: "application/x-ndjson" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "qc-v6-youtube.jsonl";
+  a.click();
+};
+
+document.getElementById("reset").onclick = () => {
+  if (!confirm("Xoá toàn bộ kết quả chấm đang lưu trong trình duyệt?")) return;
+  marks = {}; saveMarks(); updateProgress(); renderList(); renderDetail();
+};
+
+updateProgress();
+applyFilter();
+</script>
+</body></html>
