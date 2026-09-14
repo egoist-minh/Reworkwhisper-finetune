@@ -108,11 +108,16 @@ gates:
   max_retention_regression_pp: 0.0    # tier1 by_source: english_token_retention must not
                                        # drop vs baseline on the same source slice (H4b)
   # Absolute bounds on data.cross_domain_path, all null = report only, never fail.
-  # docs/v6-curriculum-plan.md §5 sets them to the published v5 adapter's measured
-  # numbers: 0.0819 CER, 0.666 retention, 0.0586 no-loanword CER.
-  cross_domain_cer_max: null
-  cross_domain_retention_min: null
-  cross_domain_no_loanword_cer_max: null
+  # The published v5 adapter's own numbers on dataset/cross-domain-bench, re-measured
+  # 2026-09-14 under the anti-loop decode path src/asr.py now uses (temperature
+  # fallback + compression_ratio_threshold): outputs/cross-domain-v5-newdecode.json,
+  # eval.batch_size=64, 299 segments. The pre-anti-loop numbers were 0.0819 CER /
+  # 0.666 retention / 0.0586 no-loanword CER -- one looped segment was carrying
+  # 0.79pp of that CER, so gating against the old CER would compare two different
+  # decode paths (docs/v6-ondomain-plan.md §3).
+  cross_domain_cer_max: 0.0740
+  cross_domain_retention_min: 0.6648
+  cross_domain_no_loanword_cer_max: 0.0613
 
 hub:
   push: false
