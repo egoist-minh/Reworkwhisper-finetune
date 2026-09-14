@@ -6,7 +6,8 @@ import json
 
 import pytest
 
-from scripts.filter_corpus_density import filter_dense, _write
+from scripts.filter_corpus_density import (filter_dense, filter_meeting_quota,
+                                           filter_min_meeting_density, _write)
 from src.normalize import Normalizer
 
 NORMALIZER = Normalizer(strip_punctuation=True, lowercase=True,
@@ -88,3 +89,69 @@ def test_write_refuses_a_destination_that_already_has_something_in_it(tmp_path):
     (out / "manifest.train_a.jsonl").write_text("{}", encoding="utf-8")
     with pytest.raises(FileExistsError):
         _write([], tmp_path / "src", out)
+
+
+# --- whole-meeting modes (docs/v6-ondomain-plan.md §1a) ------------------------
+
+def test_min_meeting_density_keeps_or_drops_a_train_meeting_whole():
+    records = [
+        _rec("dense", "seg_0000", "chao cac ban team"),      # 1/4 -- meeting kept whole,
+        _rec("dense", "seg_0001", "chao cac ban"),           # including this bare segment
+        _rec("sparse", "seg_0000", "chao cac ban team"),     # 1/16 overall -- dropped whole,
+        _rec("sparse", "seg_0001", "chao cac ban chao cac ban chao cac ban chao cac ban"),
+        _rec("val_a", "seg_0000", "chao cac ban"),
+    ]
+    kept, stats = filter_min_meeting_density(records, VAL_MEETINGS, NORMALIZER, min_density=0.1)
+    assert [(r["meeting_id"], r["segment_id"]) for r in kept] == [
+        ("dense", "seg_0000"), ("dense", "seg_0001"), ("val_a", "seg_0000")]
+    assert stats["train"]["after"]["n_meetings"] == 1
+    assert stats["val"]["after"]["n_segments"] == 1
+
+
+def test_quota_adds_loanword_free_segments_longest_first():
+    records = [
+        _rec("m", "seg_0000", "chao team"),                  # carrier: 1 foreign / 2 tokens
+        _rec("m", "seg_0001", "chao cac ban", duration=30.0),   # 3 tokens -> 1/5 = 20%
+        _rec("m", "seg_0002", "chao cac ban", duration=10.0),   # would drop to 1/8 = 12.5%
+    ]
+    kept, _ = filter_meeting_quota(records, [], NORMALIZER, quota=0.2,
+                                    min_meeting_foreign_density=0.0)
+    assert [r["segment_id"] for r in kept] == ["seg_0000", "seg_0001"]
+
+
+def test_quota_skips_a_segment_that_breaches_but_keeps_walking():
+    # The long one would breach the quota; the short one after it still fits, so
+    # the walk must not stop at the first breach.
+    records = [
+        _rec("m", "seg_0000", "chao team"),                              # 1/2
+        _rec("m", "seg_0001", "chao cac ban chao cac ban", duration=30.0),  # -> 1/8, breaches
+        _rec("m", "seg_0002", "chao cac", duration=10.0),                # -> 1/4, fits
+    ]
+    kept, _ = filter_meeting_quota(records, [], NORMALIZER, quota=0.25,
+                                    min_meeting_foreign_density=0.0)
+    assert [r["segment_id"] for r in kept] == ["seg_0000", "seg_0002"]
+
+
+def test_quota_drops_a_meeting_whose_carriers_alone_are_below_theta():
+    # Its densest possible subset is still under theta, so no cut can reach the quota.
+    records = [_rec("m", "seg_0000", "chao cac ban cac ban team"),   # carriers: 1/6
+               _rec("m", "seg_0001", "chao cac ban")]
+    kept, _ = filter_meeting_quota(records, [], NORMALIZER, quota=0.2,
+                                    min_meeting_foreign_density=0.2)
+    assert kept == []
+
+
+def test_quota_ties_break_on_segment_id_so_the_corpus_rebuilds_identically():
+    records = [_rec("m", "seg_0000", "chao team"),
+               _rec("m", "seg_0002", "chao cac ban", duration=10.0),
+               _rec("m", "seg_0001", "chao cac ban", duration=10.0)]
+    kept, _ = filter_meeting_quota(records, [], NORMALIZER, quota=0.2,
+                                    min_meeting_foreign_density=0.0)
+    assert [r["segment_id"] for r in kept] == ["seg_0000", "seg_0001"]
+
+
+def test_val_and_test_untouched_by_both_meeting_modes():
+    for kept, _ in (filter_min_meeting_density(RECORDS, VAL_MEETINGS, NORMALIZER, 1.0),
+                    filter_meeting_quota(RECORDS, VAL_MEETINGS, NORMALIZER, 1.0, 1.0)):
+        assert [(r["meeting_id"], r["segment_id"]) for r in kept] == [
+            ("val_a", "seg_0000"), ("test_a", "seg_0000")]
