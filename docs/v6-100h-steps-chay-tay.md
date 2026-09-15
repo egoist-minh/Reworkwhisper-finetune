@@ -7,20 +7,19 @@ Bảng lệnh theo thứ tự cho lượt thuê máy. Quyết định và lý do
 Đặc điểm lượt này khác quy trình mặc định: **không chạy `--stage baseline`**, không chạy
 `sweep-gate`, không cần `dataset/vivos`, không chạy `scripts/select_val_meetings.py`.
 
-**Lô TTS +5h (commit `aa51276`, 15/09) không đụng tới `dataset/v6-corpus`.** Nó gộp vào
-`dataset/v6-ondomain-15h`, ra `dataset/v6-ondomain-15h-tts5h` — thư mục khác, local-only,
-gitignored, `scripts/merge_ondomain15h_tts_batch.py` không gọi HF upload nào nên chắc chắn
-**chưa push** lên đâu cả. `dataset/v6-corpus` (mtime 12/09, không đổi) là corpus HF private
-`rework-whisper-v6-org/v6-corpus` mà lượt này dùng — số liệu 34.972/365/654 ở plan §2 vẫn
-đúng. Đừng lẫn hai tên `v6-ondomain-15h-tts5h` và `v6-corpus`.
+**Corpus lượt này là `v6-corpus` cộng add-on 9,07 h TTS.** `v6-corpus.tar` trên Hub là bản
+12/09 và không chứa hai lô `paid-meeting-vi-0247-0296` / `paid-meeting-vi-0297-0339`;
+`scripts/build_v6_corpus_addon.py` đóng riêng phần mới (1,57 GB) để giải nén đè lên. Train
+thành **42.794 segment / 106,69 h / density 3,55%** (trước khi thêm: 2,34%). Lý do ở plan
+§2.1. Đừng lẫn với `dataset/v6-ondomain-15h-tts10h` — thư mục khác, dòng thí nghiệm khác.
 
 ---
 
 ## 0. Trên máy Windows, trước khi thuê máy (bắt buộc)
 
 Máy thuê lấy mã nguồn bằng `git clone`, nên mọi commit chưa push đều không tồn tại với nó.
-Hiện có **18 commit chưa push**, trong đó có đúng hai commit lượt này phụ thuộc
-(`2058e24` lưu checkpoint mỗi vòng eval + `--adapter` cho benchmark, `ac5183c` eval_steps=400):
+Mọi thứ lượt này cần đã push tới `c208eed` (val 7 cuộc, `on_train_end`, watcher đẩy
+checkpoint). Xác nhận không còn gì kẹt lại:
 
 ```bash
 git push origin main
@@ -49,7 +48,7 @@ ssh -o StrictHostKeyChecking=accept-new speech-agent-gpu \
 
 Hai điều phải xác nhận trước khi đi tiếp: **không có job của người khác đang chiếm GPU**
 (mọi số đo thời gian sẽ vô nghĩa), và **còn ít nhất 60 GB đĩa trống** (corpus 14,7 GB tar
-cộng phần giải nén, cộng ~1,85 GB checkpoint `step-*`).
+cộng add-on 1,57 GB, cộng phần giải nén, cộng ~1,7 GB checkpoint `step-*`).
 
 ## 2. Mã nguồn và môi trường
 
@@ -60,7 +59,47 @@ git clone -b main https://github.com/egoist-minh/Reworkwhisper-finetune.git Fine
 cd Fine_tune_wf && git rev-parse HEAD      # phải trùng commit đã ghi ở §0
 
 python3 -m venv .venv && source .venv/bin/activate
-pip install -q --upgrade pip && pip install -r requirements.txt
+pip install -q --upgrade pip && pip install -q huggingface_hub hf_transfer
+```
+
+**Bật lượt tải corpus ngay tại đây**, trước `pip install -r requirements.txt` — 14,7 GB là
+khoản dài nhất của cả lượt thuê, và phần cài đặt bên dưới không cần đợi nó:
+
+```bash
+export HF_TOKEN=<token org rework-whisper-v6-org — cần quyền GHI, §8 đẩy adapter lên>
+export HF_HUB_ENABLE_HF_TRANSFER=1
+mkdir -p ~/speech/Fine_tune_wf/dataset
+
+cat > fetch_corpus.sh <<'EOF'
+set -e
+cd ~/speech/Fine_tune_wf
+source .venv/bin/activate
+export HF_HUB_ENABLE_HF_TRANSFER=1
+huggingface-cli download rework-whisper-v6-org/v6-corpus v6-corpus.tar \
+    --repo-type dataset --local-dir .
+tar -xf v6-corpus.tar -C dataset
+rm -f v6-corpus.tar
+huggingface-cli download rework-whisper-v6-org/v6-corpus-addon v6-corpus-addon.tar \n    --repo-type dataset --local-dir .
+tar -xf v6-corpus-addon.tar -C dataset/v6-corpus
+rm -f v6-corpus-addon.tar
+echo FETCH_OK
+EOF
+
+tmux new-session -d -s fetch "bash fetch_corpus.sh > fetch.log 2>&1"
+```
+
+Viết ra file rồi mới `tmux` chạy, không nhét lệnh vào chuỗi lồng nhau — `tmux` + `bash -lc`
++ `python -c` là ba tầng nháy, sai một dấu là tải nhầm hoặc im lặng không chạy.
+`HF_TOKEN` đã export ở shell hiện tại nên script kế thừa được.
+
+`HF_HUB_ENABLE_HF_TRANSFER=1` đổi tầng tải sang backend Rust nhiều luồng; trên đường truyền
+nhanh nó là khác biệt lớn nhất của cả bảng ngân sách. `rm` ngay sau khi giải nén để không
+giữ 14,7 GB tar cạnh 14,7 GB đã bung.
+
+Trong lúc nó chạy, cài nốt phần còn lại:
+
+```bash
+pip install -r requirements.txt
 ```
 
 Kiểm torch trước mọi thứ khác — `pip install torch` hay lấy bản CUDA mới hơn driver:
@@ -84,22 +123,18 @@ PYTHONPATH=. .venv/bin/python -m pytest -q
 
 ## 3. Dữ liệu
 
-### 3.1 Corpus (private, cần token)
+### 3.1 Corpus — đợi lượt tải ở §2 xong
 
 ```bash
-export HF_TOKEN=<token org rework-whisper-v6-org — cần quyền GHI, §8 đẩy adapter lên>
-mkdir -p dataset
-.venv/bin/python -c "
-from huggingface_hub import hf_hub_download
-print(hf_hub_download('rework-whisper-v6-org/v6-corpus','v6-corpus.tar',
-                      repo_type='dataset', local_dir='.'))"
-tar -xf v6-corpus.tar -C dataset
+tail -2 fetch.log        # phải thấy FETCH_OK
+ls dataset/v6-corpus | head
 ```
 
-Dùng `huggingface_hub`, **không** dùng `curl` — `curl` không xác thực bị bóp xuống
-~120 kB/s so với 51 MB/s. Đây là khoản lâu nhất của cả lượt (30–45 phút).
+Dùng `huggingface-cli`, **không** dùng `curl` — `curl` không xác thực bị bóp xuống
+~120 kB/s so với 51 MB/s.
 
-Xác nhận split đúng như plan §2 đã đo (train 34.972 / val 365 / test 654):
+Xác nhận split đúng như plan §2.1 đã đo — **train 42.794 / val 1.179 / test 654** sau khi
+có add-on ở §3.1b và `data.val_meetings` ở §3.3:
 
 ```bash
 PYTHONPATH=. .venv/bin/python -c "
@@ -110,6 +145,20 @@ cfg.data.dataset_path = 'dataset/v6-corpus'
 tr, va, te = resolve_splits(load_manifests(cfg.data.dataset_path), cfg.data.val_meetings)
 print(len(tr), len(va), len(te))"
 ```
+
+### 3.1b Add-on TTS — kiểm đã nằm đúng chỗ
+
+Tar add-on đóng **không có thư mục gốc**, nên nó bung thẳng vào `dataset/v6-corpus/` và
+trộn cùng manifest sẵn có. Kiểm:
+
+```bash
+ls dataset/v6-corpus/manifest.paid_meeting_0297.jsonl      # phải tồn tại
+ls dataset/v6-corpus/manifest.*.jsonl | wc -l              # phải là 392
+ls dataset/v6-corpus/audio/paid_meeting_0297/raw_turns | head -2
+```
+
+392 = 299 cuộc của corpus gốc cộng 93 cuộc của hai lô TTS. Sai số này thì **dừng** — 
+`resolve_splits` sẽ im lặng ra một train nhỏ hơn và mọi số bước dưới đây lệch theo.
 
 ### 3.2 Bench cross-domain (scp từ máy Windows)
 
@@ -161,19 +210,21 @@ cfg.data.val_meetings += ['zlKBfNzfh50','coteccons-agm-2025','jB1P4bqLwDY']
 print(split_stats(resolve_splits(load_manifests('dataset/v6-corpus'), cfg.data.val_meetings)))"
 ```
 
-Phải ra train 34.158 / val 1.179 / test 654.
+Phải ra train 42.794 / val 1.179 / test 654 (đã có add-on ở §3.1b).
 
 | | trước | sau |
 |---|---|---|
-| train | 34.972 seg, 101,23 h, density 2,48%, 6.555 step | 34.158 seg, 97,62 h, density **2,34%**, **6.402 step** |
+| train | 43.608 seg, 110,30 h, density 3,64%, 5.452 step | 42.794 seg, 106,69 h, density **3,55%**, **5.350 step** |
 | val | 4 mtg, 365 seg, 0,79 h, density 8,89%, 253 seg có loanword | 7 mtg, **1.179 seg**, 4,40 h, density **7,12%**, **791** seg có loanword |
 
 Val to gấp 3,2 lần mà density gần như đứng yên: 8,89% xuống 7,12%, và **test là 7,06%** —
 val giờ đo trên cùng nồng độ code-switch với bộ sẽ chấm ở §7. Số segment có loanword tăng
 253 lên 791, đủ để ValCER thôi trồi sụt vài điểm giữa các vòng.
 
-Density train tụt 2,48% xuống 2,34% vì ba cuộc họp bị rút đều đậm hơn trung bình — mất
-0,14 điểm trên 97,6 h, không đáng kể so với cái được ở val. Step rời 6.555 xuống 6.402.
+Hai cột trên đều đo trên corpus **đã có add-on**; chúng tách riêng tác dụng của việc mở
+val, không phải của add-on. Density train tụt 3,64% xuống 3,55% vì ba cuộc bị rút đều đậm
+hơn trung bình — mất 0,09 điểm trên 106,7 h, không đáng kể so với cái được ở val. Step rời
+5.452 xuống 5.350.
 
 **ValCER lượt này vẫn không so được với lượt trước** (4 cuộc họp so với 7) — xem §5.
 
@@ -226,7 +277,15 @@ Sai cổng nào thì dừng, sửa xong mới chạy lượt thật.
 
 Dọn trước khi vào lượt thật: `rm -rf outputs/smoke-steps outputs/smoke-steps.zip`.
 
-## 5. Lượt 100 h (~96 phút)
+## 5. Lượt 100 h (~80 phút)
+
+**2 epoch, không phải 3.** 3 epoch là 8.025 bước cộng 20 vòng eval = 164 phút tính từ lúc
+train chạy, tức phải tải xong 16 GB trong 16 phút để vừa trần 3 giờ. Không xảy ra. Đây là
+chỗ duy nhất lượt này lệch khỏi cấu hình v5 — nói đúng tên khi trình số.
+
+Kèm theo: `lr_scheduler_type` mặc định là linear và warmup 0,1 tính trên tổng số bước, nên
+2 epoch có warmup 535 bước và LR về 0 ở 5.350. Một lượt 3 epoch sau này **không chồng
+đường cong lên lượt này được** — mọi điểm đều ở LR khác, không riêng phần đuôi.
 
 ```bash
 export PYTHONPATH=. TRANSFORMERS_AUTO_CONVERSION=0
@@ -237,7 +296,7 @@ OV="--override run_id=$R
     --override data.ood_eval_path=null
     --override data.val_meetings=[paid_meeting_0001,paid_meeting_0002,paid_meeting_0011,rCd8DSMk3-c,zlKBfNzfh50,coteccons-agm-2025,jB1P4bqLwDY]
     --override data.cross_domain_path=dataset/cross-domain-bench
-    --override training.epochs=3
+    --override training.epochs=2
     --override training.learning_rate=2.0e-4
     --override training.batch_size=16 --override training.grad_accum_steps=1
     --override training.gradient_checkpointing=false
@@ -263,7 +322,8 @@ tmux new-session -d -s push "bash -lc '
   export PYTHONPATH=. HF_TOKEN=$HF_TOKEN
   python -m scripts.push_checkpoints_live \
       --run-dir outputs/$R \
-      --repo-id rework-whisper-v6-org/$R-checkpoints
+      --repo-id rework-whisper-v6-org/$R-checkpoints \
+      --log run.log
 ' > push.log 2>&1"
 
 tail -5 push.log      # sau vòng eval đầu phải thấy dòng step-400
@@ -280,6 +340,10 @@ Không cần đẩy `checkpoints/best/`: `on_evaluate` ghi `best/` và `step-<N>
 model trong cùng một lệnh ([src/train.py:362](../src/train.py#L362)), nên mọi `best/` từng
 tồn tại đều trùng byte với một `step-<N>` đã lên.
 
+`--log run.log` đẩy kèm log mỗi vòng quét, ghi đè bản cũ. Lịch sử ValCER chỉ nằm trong
+`run.log` và `trainer_state.json`, cả hai đều chết cùng máy — thiếu nó thì checkpoint cứu
+được về sau không có đường cong eval nào để đọc cùng.
+
 Máy chết ở bước 3.000 thì cái mất là 3.000 bước GPU sau đó, không phải toàn bộ lượt: các
 điểm `step-400`/`800`/`1.600` mà §6 đặt cược đã nằm trên Hub. Tải về bằng
 `huggingface_hub.snapshot_download(repo_id, allow_patterns='step-800/*')`.
@@ -292,7 +356,7 @@ không xáo ([src/data.py:151](../src/data.py#L151)), nên để 100 thì ValCER
 được chấm trên 92 segment của `paid_meeting_0001` cộng 8 segment của `0002` — một cuộc
 họp, toàn synthetic, và **không segment YouTube nào**, tức 3 cuộc họp thêm ở 3.3 không
 được chấm lần nào. Bỏ cap thì mỗi vòng chấm đủ 1.179 segment, khoảng 70 giây ở batch 64,
-16 vòng là ~19 phút — đã tính trong 96 phút ở tiêu đề mục.
+13 vòng là ~15 phút — đã tính trong 80 phút ở tiêu đề mục.
 
 **ValCER lượt này không so được với lượt trước.** `Outputs/v6-corpus-r32.run.log` và mọi
 run cũ đo trên 4 cuộc họp; từ đây là 7. So hai con số là so hai bộ đo khác nhau.
@@ -307,13 +371,29 @@ ls outputs/$R/checkpoints/                 # sau vòng eval đầu phải có st
 Mốc nhận ra bất thường: **0,728 giây/bước** trên H200. Quá 2 giây/bước là có gì sai —
 `gradient_checkpointing` còn bật, job khác chiếm GPU, hoặc dataloader nghẽn.
 
-Tổng **6.402 bước** (sau khi 3.3 rút 814 segment khỏi train), 16 vòng eval ở 400, 800,
-…, 6.400. Cộng `on_train_end`, trên đĩa sẽ có 17 thư mục `step-*`: `step-400` … `step-6400`
-và **`step-6402`** — bước cuối, không trùng vòng eval nào.
+`ceil(42794/16)` = **2.675 bước/epoch** ([src/train.py:239](../src/train.py#L239) dùng
+`ceil`, không phải chia lấy nguyên), nên 2 epoch là **5.350 bước**: 13 vòng eval ở 400,
+800, …, 5.200, cộng `step-5350` do `on_train_end` lưu. Trên đĩa sẽ có **14 thư mục
+`step-*`** cộng `best/`.
 
-**Run đứt:** `python -m src.pipeline --stage train --resume $OV`. **Đừng xoá
+**Run đứt, máy còn sống:** `python -m src.pipeline --stage train --resume $OV`. **Đừng xoá
 `checkpoints/`** — chạy lại không có `--resume` khi đã có checkpoint là `FileExistsError` cố
 ý, xoá là mất số giờ GPU đã trả.
+
+**Máy chết hẳn:** `--resume` không dùng được. Nó cần `checkpoints/checkpoint-<N>` — optimizer
+state của Trainer, `save_total_limit=2` ([src/train.py:189](../src/train.py#L189)), nằm trong
+`outputs/` nên chết cùng máy, và 332 MB mỗi cái là quá nặng để watcher đẩy mỗi vòng. Trên
+máy mới chỉ còn hai đường:
+
+1. **Chạy lại từ bước 1.** Sạch, so sánh được, nhưng trả lại toàn bộ số giờ đã mất.
+2. **Khởi động ấm từ adapter đã lên Hub:** tải `step-<N>` cao nhất về rồi
+   `--override training.init_adapter=<đường dẫn>`. **Đây không phải resume** — mất optimizer
+   state và lịch LR, warmup chạy lại từ đầu, nên lượt mới là một đường cong khác chứ không
+   phải phần đuôi của đường cũ. Dùng để cứu lấy một adapter dùng được, không dùng để lấy số
+   cho bảng so.
+
+Dù đường nào thì `step-400`/`800`/`1600` đã nằm trên Hub — §6 vẫn chấm được, và §6 mới là
+deliverable chính.
 
 ## 6. Sàng cross-domain — 4 checkpoint (~10 phút)
 
@@ -325,7 +405,7 @@ nào thắng v5.
 `best/`. Đừng đọc `best/` như bản thắng.
 
 ```bash
-for S in 400 800 1600 6402; do
+for S in 400 800 1600 5350; do
   PYTHONPATH=. .venv/bin/python -m scripts.score_cross_domain_model \
       --model vinai/PhoWhisper-large \
       --adapter outputs/v6-100h-steps/checkpoints/step-$S \
@@ -340,9 +420,10 @@ grep -h retention outputs/v6-100h-steps/metrics/cross_domain.step-*.json
 Mốc so, v5 dưới đúng đường decode này: **0,0740 CER / 0,6648 retention / 0,0613
 no-loanword CER**.
 
-Nếu bốn điểm lộ ra một đỉnh, chấm thêm hàng xóm của nó (2,5 phút mỗi điểm, 13 checkpoint
+Nếu bốn điểm lộ ra một đỉnh, chấm thêm hàng xóm của nó (2,5 phút mỗi điểm, các checkpoint
 kia vẫn còn trên đĩa). Nếu đồng hồ chạy chậm, bỏ `step-1600` trước — **không bao giờ cắt cả
-bước 6**.
+bước 6**. Và chấm theo thứ tự trên: `step-400` rồi `step-800` trước, đừng đợi đủ bốn điểm
+mới đọc kết quả, vì đó là hai điểm plan đặt cược.
 
 Ghi lại tên thư mục thắng — §8 cần nó làm `--best-retention`.
 
@@ -376,10 +457,10 @@ Nếu thiếu thời gian: bỏ `vimedcss-test` (1.612 segment, −15 phút), gi
 
 Đã mất một lượt đo vì chép muộn. Làm ngay khi §6 xong, đừng đợi §7.
 
-Watcher ở §5 đã đẩy sẵn cả 17 `step-*` lên repo `-checkpoints` trong lúc train; mục này
+Watcher ở §5 đã đẩy sẵn mọi `step-*` lên repo `-checkpoints` trong lúc train; mục này
 tách riêng **ba bản đáng giữ** sang ba repo có tên đọc được, để sau này không ai phải tra
-lại xem `step-1600` là cái gì. Trước khi chạy, quét nốt phần watcher chưa kịp (`step-6402`
-vừa sinh ra ở cuối lượt):
+lại xem `step-1600` là cái gì. Trước khi chạy, quét nốt phần watcher chưa kịp (bước cuối
+vừa sinh ra và chưa qua vòng quét nào):
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m scripts.push_checkpoints_live \
@@ -387,7 +468,7 @@ PYTHONPATH=. .venv/bin/python -m scripts.push_checkpoints_live \
     --repo-id rework-whisper-v6-org/v6-100h-steps-checkpoints --once
 ```
 
-Máy Windows hết chỗ, nên **18 adapter không chép về**. Chạy **trên máy thuê**:
+Máy Windows hết chỗ, nên **15 adapter không chép về**. Chạy **trên máy thuê**:
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m scripts.push_run_adapters \
@@ -397,10 +478,9 @@ PYTHONPATH=. .venv/bin/python -m scripts.push_run_adapters \
 ```
 
 Ba repo private: `-best-valcer` (`checkpoints/best/`), `-best-retention` (bản §6 chọn),
-`-last` (`step-6402`, tự tìm số lớn nhất). `eval_val_cer` không nhìn thấy retention, nên
-hai cái đầu là hai checkpoint khác nhau. `-last` lần này chỉ cách vòng eval cuối 2 bước
-(6.402 so với 6.400) — gần như trùng, nhưng vẫn đẩy: nó là bước train thật sự dừng, và
-trên một lượt đứt giữa chừng thì đó là thứ duy nhất có. Thêm `--dry-run` để kiểm ba đường
+`-last` (`step-5350`, script tự tìm số lớn nhất). `eval_val_cer` không nhìn thấy retention,
+nên hai cái đầu là hai checkpoint khác nhau. `-last` cách vòng eval cuối 150 bước: nó là
+bước train thật sự dừng, và trên một lượt đứt giữa chừng thì đó là thứ duy nhất có. Thêm `--dry-run` để kiểm ba đường
 dẫn trước khi đẩy 333 MB.
 
 Adapter đẩy lên **chưa nhân λ**. λ là lựa chọn lúc triển khai, bake sau bằng

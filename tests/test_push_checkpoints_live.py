@@ -67,6 +67,24 @@ def test_a_failed_upload_is_retried_and_not_recorded(tmp_path, monkeypatch):
     assert json.loads((run / ".pushed_checkpoints.json").read_text()) == ["step-400"]
 
 
+def test_the_log_is_re_uploaded_every_sweep_so_the_eval_curve_survives(tmp_path, monkeypatch):
+    run = tmp_path / "run"
+    _adapter(run / "checkpoints" / "step-400")
+    (run / "run.log").write_text("ValCER 0.03", encoding="utf-8")
+    seen = []
+
+    def fake_file(path, repo_id, path_in_repo, private=True):
+        seen.append(path_in_repo)
+
+    monkeypatch.setattr("scripts.push_checkpoints_live.upload_file", fake_file)
+    monkeypatch.setattr("scripts.push_checkpoints_live.push_adapter",
+                        lambda *a, **k: "")
+    watch(run, "org/ck", once=True, log=run / "run.log")
+    watch(run, "org/ck", once=True, log=run / "run.log")
+    # Uploaded on both sweeps, unlike a checkpoint, because it keeps growing.
+    assert seen == ["run.log", "run.log"]
+
+
 def test_a_restart_does_not_re_upload_what_is_already_on_the_hub(tmp_path):
     run = tmp_path / "run"
     _adapter(run / "checkpoints" / "step-400")

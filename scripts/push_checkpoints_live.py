@@ -14,6 +14,11 @@ Run it in a second tmux window next to training. It never touches the training
 process, so a network failure here cannot kill the run -- a failed upload is
 retried on the next sweep.
 
+`--log` uploads a text file (the run's log) on every sweep, overwriting the copy
+in the repo. The ValCER history lives only in that log and in trainer_state.json,
+both of which die with the box, so without it a salvaged checkpoint has no eval
+curve to read it against.
+
 `checkpoints/best/` is not uploaded and does not need to be: `on_evaluate` writes
 it and `step-<N>` from the same model at the same moment (src/train.py), so every
 `best/` there has ever been is byte-identical to some `step-<N>` already up.
@@ -28,7 +33,7 @@ import re
 import time
 from pathlib import Path
 
-from src.hub import push_adapter
+from src.hub import push_adapter, upload_file
 
 STEP_DIR = re.compile(r"^step-(\d+)$")
 WEIGHTS = ("adapter_model.safetensors", "adapter_model.bin")
@@ -69,7 +74,8 @@ def _save(state: Path, pushed: set[str]) -> None:
 
 
 def watch(run_dir: Path, repo_id: str, interval: float = 120.0,
-          settle: float = 60.0, private: bool = True, once: bool = False) -> None:
+          settle: float = 60.0, private: bool = True, once: bool = False,
+          log: Path | None = None) -> None:
     checkpoints = run_dir / "checkpoints"
     state = run_dir / ".pushed_checkpoints.json"
     pushed = _load(state)
@@ -88,6 +94,11 @@ def watch(run_dir: Path, repo_id: str, interval: float = 120.0,
                 pushed.add(d.name)
                 _save(state, pushed)
                 print(f"{d.name}: https://huggingface.co/{repo_id}/tree/main/{d.name}")
+        if log is not None and log.exists():
+            try:
+                upload_file(log, repo_id, log.name, private=private)
+            except Exception as exc:                      # noqa: BLE001
+                print(f"{log.name}: upload failed, will retry -- {exc}")
         if once:
             return
         time.sleep(interval)
@@ -107,9 +118,12 @@ def main() -> None:
                     help="create the repo public (default: private)")
     ap.add_argument("--once", action="store_true",
                     help="one sweep and exit, for a run that has already finished")
+    ap.add_argument("--log", type=Path, default=None,
+                    help="a log file to re-upload on every sweep, e.g. run.log -- "
+                         "without it the ValCER history dies with the box")
     args = ap.parse_args()
     watch(args.run_dir, args.repo_id, args.interval, args.settle,
-          not args.public, args.once)
+          not args.public, args.once, args.log)
 
 
 if __name__ == "__main__":

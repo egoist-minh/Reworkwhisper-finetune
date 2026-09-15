@@ -32,6 +32,21 @@ def push_adapter(adapter_dir: str | Path, repo_id: str, private: bool = True,
     return f"https://huggingface.co/{repo_id}"
 
 
+def upload_file(path: str | Path, repo_id: str, path_in_repo: str,
+                private: bool = True) -> str:
+    """Puts one file in `repo_id`, overwriting whatever was there under that
+    name. Used to park a still-growing run.log next to the checkpoints it
+    explains (scripts/push_checkpoints_live.py), so the eval history survives
+    the box it was written on."""
+    from huggingface_hub import HfApi
+
+    api = HfApi()
+    api.create_repo(repo_id, private=private, exist_ok=True)
+    api.upload_file(path_or_fileobj=str(path), path_in_repo=path_in_repo,
+                    repo_id=repo_id)
+    return f"https://huggingface.co/{repo_id}/blob/main/{path_in_repo}"
+
+
 def _model_card(repo_id: str, gate_results: dict) -> str:
     lines = [f"# {repo_id}", "", "## Gate results", "", "| Tier | CER | Bound | Pass |",
              "|---|---|---|---|"]

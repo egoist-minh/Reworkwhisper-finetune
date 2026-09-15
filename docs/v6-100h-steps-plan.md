@@ -39,7 +39,7 @@ trong hàm loss biết nó đang xảy ra.
 
 ## 0.1 Vì sao lượt 100 h là phép thử tốt nhất
 
-6.402 bước = **8 lần** ngân sách bước của v5. Lưu checkpoint dọc đường thì một lượt train
+5.350 bước = **6,7 lần** ngân sách bước của v5. Lưu checkpoint dọc đường thì một lượt train
 quét được cả trục số-bước trên **cùng một corpus** — không lẫn biến corpus như bốn điểm
 dữ liệu trên.
 
@@ -68,12 +68,12 @@ song với `best`:
 model.save_pretrained(str(out / "checkpoints" / f"step-{state.global_step}"))
 ```
 
-Adapter rank 16 là 115.487.384 byte (đo trên `Outputs/v3-r16/adapter/`), nên 17 vòng cộng
-`best/` là **~2,0 GB**. `archive_run` loại thư mục tên `checkpoint-<số>` (optimizer state
+Adapter rank 16 là 115.487.384 byte (đo trên `Outputs/v3-r16/adapter/`), nên 14 vòng cộng
+`best/` là **~1,7 GB**. `archive_run` loại thư mục tên `checkpoint-<số>` (optimizer state
 của Trainer) — `step-<số>` **không** khớp bộ lọc đó nên tự động đi vào zip.
 
 Máy Windows hết chỗ, nên **không chép zip về**: ba adapter đáng giữ đi thẳng lên Hub bằng
-`scripts/push_run_adapters.py` (`best/`, bản retention cao nhất ở §3a, và `step-6402`),
+`scripts/push_run_adapters.py` (`best/`, bản retention cao nhất ở §3a, và `step-5350`),
 phần còn lại bỏ cùng máy thuê. Chỉ scp `run.log`, `outputs/<run>/metrics/` và thư mục
 bench về.
 
@@ -101,7 +101,7 @@ một thư mục `checkpoints/step-*`. Cần torch, nên chạy trên máy thuê
 
 **Đã xong** (commit `ef36306`, 15/09).
 
-### 1.3 Tắt được early stopping — nếu không, lượt này có thể tự dừng trước bước 6.402
+### 1.3 Tắt được early stopping — nếu không, lượt này có thể tự dừng trước bước 5.350
 
 `_EarlyStoppingState(patience=3)` trước đây ghim cứng trong [src/train.py](../src/train.py):
 ba vòng eval liên tiếp ValCER không cải thiện là `control.should_training_stop = True`.
@@ -115,8 +115,8 @@ ba vòng eval liên tiếp ValCER không cải thiện là `control.should_train
 
 Đơn điệu giảm, nhưng khoảng cách vòng 4→5 của `-15h` chỉ **0,014 pp**. Val 1.179 segment
 của lượt này đo yên hơn val 365 segment, nên plateau đọc ra sạch hơn — và đó chính là vấn
-đề: 16 vòng trên một đường cong đã phẳng từ giữa lượt thì ba vòng liên tiếp không cải
-thiện gần như chắc chắn xảy ra. Dừng sớm ở bước ~3.200 là mất **cả hai** deliverable: số
+đề: 13 vòng trên một đường cong đã phẳng từ giữa lượt thì ba vòng liên tiếp không cải
+thiện gần như chắc chắn xảy ra. Dừng sớm ở bước ~2.800 là mất **cả hai** deliverable: số
 cuối cho professor, và hai điểm cuối của đường cong retention. Thêm nữa, thứ chọn
 checkpoint là retention cross-domain, một đại lượng ValCER không nhìn thấy — để ValCER kết
 thúc lượt train là để sai người cầm lái.
@@ -152,33 +152,61 @@ Cấu hình công bằng — giống v5 ở mọi thứ trừ corpus, để so �
 | | giá trị | lý do |
 |---|---|---|
 | `lora.rank` / `alpha` | 16 / 32 | hình dạng đạt retention 66,6% ở v5. `v6-corpus-r32` chạy rank 32 nên chưa bao giờ so được với v5 |
-| `training.epochs` | 3 | như v5 |
+| `training.epochs` | **2** | v5 chạy 3 — đây là chỗ duy nhất lượt này lệch khỏi cấu hình v5, và là cái giá của trần 3 giờ (§4) |
 | `learning_rate` | 2.0e-4 | như v5 |
 | `batch` × `grad_accum` | 16 × 1 | batch hiệu dụng 16, bằng v5 |
 | `gradient_checkpointing` | false | chỉ T4 cần |
 | `init_adapter` | null | LoRA tươi. Curriculum hai pha đã đo và thua (`v6-dense-{1,3,4}`) |
-| `eval_steps` | **400** | 16 vòng trên 6.402 bước; mỗi vòng lưu một adapter |
+| `eval_steps` | **400** | 13 vòng trên 5.350 bước; mỗi vòng lưu một adapter |
 | `training.val_limit` | **null** | `ManifestDataset.limit()` lấy `records[:n]` không xáo, nên cap 100 chỉ chấm được `paid_meeting_0001` — ba cuộc họp thêm ở dưới không vòng nào chạm tới. Chấm đủ 1.179 segment, ~70 giây/vòng ở batch 64 |
 | `eval.batch_size` | 64 | CER lệch theo batch — mọi phép đo trong lượt phải cùng số này |
 | `data.ood_eval_path` | null | không stage nào đọc nữa sau §1.3 của plan kia |
 | `early_stopping_patience` | **null** | §1.3. Không có dòng này thì ValCER có quyền kết thúc lượt train |
 | `data.val_meetings` | **7 cuộc** | mặc định 4 cuộc + `zlKBfNzfh50`, `coteccons-agm-2025`, `jB1P4bqLwDY` — xem dưới |
-| corpus | `dataset/v6-corpus` | **34.158** segment train → **2.134** bước/epoch |
+| corpus | `v6-corpus` + add-on TTS | **42.794** segment train → **2.675** bước/epoch |
 
-Số corpus đo lại 15/09 bằng `load_manifests` + `resolve_splits`, không lấy từ card HF:
-**train 34.972 / val 365 / test 654** với `data.val_meetings` mặc định. Card ghi 34.525 —
-chênh 447 segment, đúng kiểu sai lệch đã ghi nhận giữa card và manifest. Sau khi val lấy
-thêm 3 cuộc (814 segment) còn **train 34.158 / val 1.179 / test 654**, tức **6.402 bước**.
+### 2.1 Corpus: `v6-corpus` cộng add-on 9,07 h TTS đậm
 
-`v6-corpus-r32` trong bảng §0 chạy 2.186 bước/epoch trên val mặc định; lượt này 2.134, ít
-hơn 2,3% dữ liệu. Chênh đó nhỏ hơn khoảng cách hai lượt cần phân biệt, nhưng khi trình số
-thì nói đúng: đây không phải cùng một tập train tới từng segment.
+`v6-corpus.tar` trên Hub là bản 12/09 và **không chứa** hai lô TTS đã giao:
 
-Mười sáu vòng eval rơi vào **400, 800, 1.200, … , 6.400** (bội số của 400). Bước cuối
-6.402 không có vòng eval, nhưng `on_train_end` ở §1.1 vẫn lưu nó, nên trên đĩa có **17 thư
-mục `step-*`** cộng `best/`. Lần này `step-6402` chỉ cách `step-6400` 2 bước — gần như
-trùng; giá trị thật của nó là ở lượt đứt giữa chừng, khi nó là checkpoint duy nhất ứng với
-bước train thật sự dừng.
+| lô | cuộc | giờ | density |
+|---|---:|---:|---:|
+| `paid-meeting-vi-0247-0296` | 50 | 4,91 | **21,47%** |
+| `paid-meeting-vi-0297-0339` | 43 | 4,15 | **14,02%** |
+| `v6-corpus` train (trước khi thêm) | — | 97,62 | 2,34% |
+
+Đây là đòn bẩy density duy nhất còn lại chưa dùng, và nó đúng vào biến §0 đang truy: v5
+đạt retention 0,666 ở density 7,13%, `v6-corpus-r32` đạt 0,486 ở 2,48%. Thêm hai lô đẩy
+train lên **3,55%**.
+
+`scripts/build_v6_corpus_addon.py` đóng riêng phần mới (1,57 GB) ở đúng layout của corpus
+để máy thuê giải nén đè lên `dataset/v6-corpus/`; dựng lại rồi đẩy lại cả 15 GB thì mất
+nguyên buổi uplink. `load_manifests` quét `manifest.*.jsonl` nên không cần bước trộn nào.
+Manifest của hai lô ghi `"split": "train"` mà `resolve_splits` chỉ nhận `demo`/`test`, nên
+script remap sang `demo` — cùng phép remap `scripts/ingest_paid_dataset_v2.py` dùng.
+
+`voice_id` của cả hai lô **trùng test 0 cuộc**, nên tính disjoint của test giữ nguyên. Lô
+0247-0296 trùng 5 voice của val, nhưng val vốn đã leak sang train từ trước nên không thêm
+hại mới.
+
+Đo lại bằng `load_manifests` + `resolve_splits`, không lấy từ card HF:
+
+| | segment | giờ | density |
+|---|---:|---:|---:|
+| train | **42.794** | 106,69 | **3,55%** |
+| val | 1.179 | 4,40 | 7,12% |
+| test | 654 | 1,58 | 7,06% |
+
+**Đừng kỳ vọng 3,55% lật được v5.** Vẫn chưa bằng một nửa 7,13%, và lần lọc density trước
+đẩy retention 48,6% lên 61,9% mà vẫn thiếu 4,6 pp. Đây là cải thiện xác suất, không phải
+lời giải.
+
+Corpus đổi nên **không so được bước/epoch với `v6-corpus-r32`** (2.186 so với 2.675). Khi
+trình số thì nói đúng tên: khác corpus, khác số epoch, khác cả rank.
+
+Mười ba vòng eval rơi vào **400, 800, 1.200, … , 5.200** (bội số của 400). Bước cuối 5.350
+không có vòng eval, nhưng `on_train_end` ở §1.1 vẫn lưu nó, nên trên đĩa có **14 thư mục
+`step-*`** cộng `best/`.
 
 `eval_steps=400` thay vì 800 mua hai thứ, giá 6 phút eval và ~0,9 GB đĩa:
 
@@ -218,6 +246,7 @@ Không chạy `sweep-gate`. Không cổng tự động. λ chốt cứng, benchm
 R=v6-100h-steps
 OV="--override run_id=$R
     --override data.dataset_path=dataset/v6-corpus
+    --override training.epochs=2
     --override data.real_bench_path=null
     --override data.ood_eval_path=null
     --override data.val_meetings=[paid_meeting_0001,paid_meeting_0002,paid_meeting_0011,rCd8DSMk3-c,zlKBfNzfh50,coteccons-agm-2025,jB1P4bqLwDY]
@@ -249,7 +278,7 @@ trước, benchmark đầy đủ chỉ cho bản thắng.**
 `scripts/score_cross_domain_model.py`, cùng đường decode chống lặp, `eval.batch_size=64`:
 
 ```bash
-for S in 400 800 1600 6402; do
+for S in 400 800 1600 5350; do
   PYTHONPATH=. .venv/bin/python -m scripts.score_cross_domain_model \
       --model vinai/PhoWhisper-large \
       --adapter outputs/v6-100h-steps/checkpoints/step-$S \
@@ -262,7 +291,7 @@ done
 - `step-400` ← **sớm hơn** v5. Nếu §0 đúng thì đây là retention cao nhất cả lượt
 - `step-800` ← đúng ngân sách bước của v5 (801), trên corpus gấp 12 lần. Đặt cược ở đây
 - `step-1600` ← điểm giữa, để biết đường cong dốc hay phẳng
-- `step-6402` ← bước cuối, số professor cần
+- `step-5350` ← bước cuối, số professor cần
 
 13 checkpoint còn lại vẫn nằm trên đĩa. Nếu bốn điểm này lộ ra một đỉnh thì chấm thêm
 hàng xóm của nó — 2,5 phút một điểm, không cần train lại gì.
@@ -321,20 +350,28 @@ theo batch, đổi batch là làm hỏng khả năng so cột.
 
 | hạng mục | phút |
 |---|---:|
-| dựng máy + tải `v6-corpus.tar` (14,7 GB, private HF) | 30–45 |
-| train 6.402 bước × 0,728 s | 78 |
-| eval val 16 vòng × 1.179 segment | 19 |
+| dựng máy + tải `v6-corpus.tar` (14,7 GB) + add-on (1,57 GB), có `hf_transfer` | 30–45 |
+| lượt train tí hon §1.1 | 3 |
+| train 5.350 bước × 0,728 s | 65 |
+| eval val 13 vòng × 1.179 segment | 15 |
 | 3a: sàng cross-domain, 4 checkpoint | 10 |
 | 3b: benchmark đầy đủ 3.223 segment, bản thắng | 30 |
-| đẩy 3 adapter lên Hub + scp `metrics/`, `run.log`, bench về | 10 |
-| **tổng** | **177–192** |
+| đẩy adapter cuối lên Hub + scp `metrics/`, `run.log`, bench về | 3 |
+| **tổng** | **156–171** |
 
-Vượt trần 180 phút ở đầu bi quan (192), và **biến số lớn nhất vẫn là tốc độ tải corpus**
+Vừa trần 180 phút, dư 9–24 phút. **2 epoch là bắt buộc, không phải lựa chọn:** 3 epoch là
+8.025 bước, cộng 20 vòng eval thành 164 phút tính từ lúc train chạy, tức phải tải xong
+16 GB trong 16 phút. Không xảy ra.
+
+Hai khoản đã cắt và không mất gì: `hf_transfer` cộng việc tải chồng lấn với `pip install`
+(§2 của guide), và watcher đẩy checkpoint trong lúc train nên §8 chỉ còn đẩy bước cuối.
+
+**Biến số lớn nhất vẫn là tốc độ tải corpus**
 — 15 phút chênh lệch ở dòng đầu bảng lớn hơn mọi thứ khác cộng lại. Thứ tự cắt nếu đồng hồ
 chạy chậm hơn dự kiến:
 
 1. Sàng 3 checkpoint thay vì 4 (bỏ `step-1600` — điểm giữa, mất ít thông tin nhất vì
-   `step-400`/`step-800`/`step-6402` đã kẹp cả hai đầu) — **−2,5 phút**.
+   `step-400`/`step-800`/`step-5350` đã kẹp cả hai đầu) — **−2,5 phút**.
 2. Bỏ `vimedcss-test` (1.612 segment, suite lớn nhất) khỏi 3b, giữ `vimedcss-hard` —
    **−15 phút**. Mất một cột của bảng summit, nên là lựa chọn cuối.
 3. **Không bao giờ cắt 3a.** Đường cong retention là lý do lượt này tồn tại; nếu chỉ kịp
@@ -346,7 +383,7 @@ chạy chậm hơn dự kiến:
 
 ## 5. Dự đoán, ghi trước để sau còn đối chiếu
 
-- Checkpoint 6.402 bước: retention **thấp hơn** 0,486 của `v6-corpus-r32`.
+- Checkpoint 5.350 bước: retention **thấp hơn** 0,486 của `v6-corpus-r32`.
 - Checkpoint 800 bước: **cao nhất trong bốn**, có cơ hội vượt 0,62.
 - Đường cong retention theo bước: **giảm đơn điệu**.
 
