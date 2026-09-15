@@ -1,6 +1,7 @@
 """Merge dataset/v6-ondomain-15h (48 train meetings, "lõi dữ liệu đậm" per
-docs/yeu-cau-lo-tts-10h.md §1) with the delivered TTS batch
-dataset/paid-meeting-vi-0247-0296 into one self-contained corpus.
+docs/yeu-cau-lo-tts-10h.md §1) with the delivered TTS batches
+dataset/paid-meeting-vi-0247-0296 and dataset/paid-meeting-vi-0297-0339 into one
+self-contained corpus.
 
 Not a bare rerun of scripts/build_mixed_dataset.py: dataset/v6-ondomain-15h/audio
 is a Windows junction to the WHOLE dataset/v6-corpus/audio pool (14.7 GB,
@@ -15,7 +16,10 @@ rejects outright (it only accepts "demo"/"test") -- remapped to "demo" here, sam
 as scripts/ingest_paid_dataset_v2.py:remap_dot2_split, so resolve_splits assigns
 every one of these meetings to actual train (none are in data.val_meetings).
 
-    python -m scripts.merge_ondomain15h_tts_batch --out dataset/v6-ondomain-15h-tts5h
+    python -m scripts.merge_ondomain15h_tts_batch --out dataset/v6-ondomain-15h-tts10h
+
+Pass --tts-src once per batch to merge a different set; the default is both
+delivered batches (9,94 h timeline / 9,06 h speech, 93 meetings).
 """
 
 import argparse
@@ -28,7 +32,8 @@ from src.config import load as load_config
 from src.data import load_manifests, resolve_splits, split_stats
 
 ONDOMAIN_SRC = Path("dataset/v6-ondomain-15h")
-TTS_SRC = Path("dataset/paid-meeting-vi-0247-0296/dataset")
+TTS_SRCS = [Path("dataset/paid-meeting-vi-0247-0296/dataset"),
+            Path("dataset/paid-meeting-vi-0297-0339/dataset")]
 
 
 def _copy_referenced_audio(records: list[dict], audio_root: Path, out_audio: Path) -> None:
@@ -50,9 +55,9 @@ def _ingest_ondomain15h(out: Path) -> list[dict]:
     return all_records
 
 
-def _ingest_tts_batch(out: Path) -> list[dict]:
+def _ingest_tts_batch(out: Path, tts_src: Path) -> list[dict]:
     all_records = []
-    for manifest_path in sorted((TTS_SRC / "manifests").glob("*.jsonl")):
+    for manifest_path in sorted((tts_src / "manifests").glob("*.jsonl")):
         meeting_id = manifest_path.stem
         records = [json.loads(l) for l in
                    manifest_path.read_text(encoding="utf-8").splitlines() if l.strip()]
@@ -65,12 +70,13 @@ def _ingest_tts_batch(out: Path) -> list[dict]:
         (out / f"manifest.{meeting_id}.jsonl").write_text(
             "\n".join(json.dumps(r, ensure_ascii=False) for r in remapped) + "\n",
             encoding="utf-8")
-        _copy_referenced_audio(remapped, TTS_SRC / "audio", out / "audio")
+        _copy_referenced_audio(remapped, tts_src / "audio", out / "audio")
         all_records.extend(remapped)
     return all_records
 
 
-def _write_provenance(out: Path, ondomain_records: list[dict], tts_records: list[dict]) -> None:
+def _write_provenance(out: Path, ondomain_records: list[dict],
+                      tts_srcs: list[Path], tts_records: dict[Path, list[dict]]) -> None:
     lines = [
         f"# {out.name} -- provenance",
         "",
@@ -79,26 +85,46 @@ def _write_provenance(out: Path, ondomain_records: list[dict], tts_records: list
         f"- `{ONDOMAIN_SRC}` (\"lõi dữ liệu đậm\", docs/yeu-cau-lo-tts-10h.md §1): "
         f"{len(ondomain_records)} records, audio copied per-record (source audio/ is a "
         "junction to the shared v6-corpus pool, not copied whole).",
-        f"- `{TTS_SRC}` (data card: `{TTS_SRC.parent}/docs/"
-        f"datacard-paid-meeting-0247-0296.md`, delivered 2026-09-15, 5,37 h / 50 cuộc "
-        "against a 10 h ask): all 50 meetings, `split` remapped train->demo.",
+    ]
+    for src in tts_srcs:
+        card = next(iter(sorted((src.parent / "docs").glob("datacard-*.md"))), None)
+        lines.append(
+            f"- `{src}` (data card: `{card}`): "
+            f"{len({r['meeting_id'] for r in tts_records[src]})} meetings, "
+            f"{len(tts_records[src])} records, `split` remapped train->demo.")
+    lines += [
         "",
-        "Acceptance check against docs/yeu-cau-lo-tts-10h.md §3: 6/7 thresholds pass; "
-        "#7 (opening-sentence duplication) fails -- 12/50 meetings (24%) open with the "
-        "same literal sentence, vs a <=5% threshold. Included anyway per user decision "
-        "2026-09-15; not deduplicated.",
+        "Acceptance check against docs/yeu-cau-lo-tts-10h.md §3 (scratch script, not "
+        "committed), per batch:",
+        "",
+        "- `paid-meeting-vi-0247-0296` (4,91 h speech / 50 cuộc): 6/7 thresholds pass; "
+        "#7 (opening-sentence duplication) fails -- 23/50 meetings (46%) share an opening "
+        "sentence with another meeting, vs a <=5% threshold. Included anyway per user "
+        "decision 2026-09-15; not deduplicated.",
+        "- `paid-meeting-vi-0297-0339` (4,15 h speech / 43 cuộc): opening-sentence "
+        "duplication is 0%; every rate threshold passes (1.695 foreign token/h, 14,2% "
+        "median per-meeting density, 250 type/h, 6,78 token/type). The only miss is the "
+        "absolute >=1.200 type/lô floor (1.038), which is written for a 10 h batch -- at "
+        "4,15 h this batch is over twice the per-hour type rate the floor implies.",
+        "",
+        "Together the two batches are 9,94 h timeline / 9,06 h speech across 93 meetings, "
+        "against the 10 h ask. Code-switch density differs between them (21,5% vs 14,0% "
+        "of tokens); they are merged without resampling.",
     ]
     (out / "provenance.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def merge(out: Path, config_path: str = "configs/experiment.yaml",
-          dry_run: bool = False) -> dict:
+          dry_run: bool = False, tts_srcs: list[Path] | None = None) -> dict:
+    tts_srcs = tts_srcs or TTS_SRCS
     ondomain_records = load_manifests(ONDOMAIN_SRC)
-    ondomain_meetings = {r["meeting_id"] for r in ondomain_records}
-    tts_meetings = {p.stem for p in (TTS_SRC / "manifests").glob("*.jsonl")}
-    overlap = ondomain_meetings & tts_meetings
-    if overlap:
-        raise ValueError(f"meeting_id collision between sources: {overlap}")
+    seen = {m: str(ONDOMAIN_SRC) for m in {r["meeting_id"] for r in ondomain_records}}
+    for src in tts_srcs:
+        for manifest_path in sorted((src / "manifests").glob("*.jsonl")):
+            if manifest_path.stem in seen:
+                raise ValueError(f"meeting_id collision: {manifest_path.stem} in both "
+                                 f"{seen[manifest_path.stem]} and {src}")
+            seen[manifest_path.stem] = str(src)
 
     if out.exists() and any(out.iterdir()):
         raise FileExistsError(f"{out} already exists and is not empty -- refusing to merge twice")
@@ -107,8 +133,10 @@ def merge(out: Path, config_path: str = "configs/experiment.yaml",
 
     if dry_run:
         tts_raw = []
-        for p in sorted((TTS_SRC / "manifests").glob("*.jsonl")):
-            tts_raw.extend(json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip())
+        for src in tts_srcs:
+            for manifest_path in sorted((src / "manifests").glob("*.jsonl")):
+                tts_raw.extend(json.loads(l) for l in
+                               manifest_path.read_text(encoding="utf-8").splitlines() if l.strip())
         tts_records = [{**r, "split": "demo"} for r in tts_raw]
         resolved = resolve_splits(ondomain_records + tts_records, cfg.data.val_meetings)
         print("split_stats (dry-run):", split_stats(resolved))
@@ -116,11 +144,12 @@ def merge(out: Path, config_path: str = "configs/experiment.yaml",
 
     out.mkdir(parents=True, exist_ok=True)
     ondomain_records = _ingest_ondomain15h(out)
-    tts_records = _ingest_tts_batch(out)
-    resolved = resolve_splits(ondomain_records + tts_records, cfg.data.val_meetings)
+    tts_records = {src: _ingest_tts_batch(out, src) for src in tts_srcs}
+    all_tts = [r for src in tts_srcs for r in tts_records[src]]
+    resolved = resolve_splits(ondomain_records + all_tts, cfg.data.val_meetings)
     stats = split_stats(resolved)
     print("split_stats:", stats)
-    _write_provenance(out, ondomain_records, tts_records)
+    _write_provenance(out, ondomain_records, tts_srcs, tts_records)
     print(f"wrote {out}")
     return stats
 
@@ -132,9 +161,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--config", default="configs/experiment.yaml")
+    ap.add_argument("--tts-src", action="append", type=Path, dest="tts_srcs",
+                    help="TTS batch dataset/ dir; repeatable, defaults to both delivered batches")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
-    merge(args.out, args.config, args.dry_run)
+    merge(args.out, args.config, args.dry_run, args.tts_srcs)
 
 
 if __name__ == "__main__":
