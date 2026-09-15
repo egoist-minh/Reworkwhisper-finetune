@@ -349,6 +349,17 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path,
                       f"best val_cer so far {stopping.best:.6f}")
             return control
 
+        def on_step_end(self, args, state, control, model=None, **kwargs):
+            # Same adapter, same directory name as the eval-round save below, but
+            # on its own schedule: one eval round costs ~7 min on a 1,179-segment
+            # val split against ~2 s to write an adapter, so the retention curve
+            # (docs/v6-100h-steps-plan.md §3a) gets its points every
+            # checkpoint_steps while eval rounds stay rare.
+            n = cfg.training.checkpoint_steps
+            if n and state.global_step % n == 0:
+                model.save_pretrained(str(out / "checkpoints" / f"step-{state.global_step}"))
+            return control
+
         def on_evaluate(self, args, state, control, metrics=None, model=None, **kwargs):
             if metrics is None or "eval_val_cer" not in metrics:
                 return control

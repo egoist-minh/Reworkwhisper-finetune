@@ -85,6 +85,8 @@ training:
                                        # UNSCALED adapter -- outputs/<run>/checkpoints/best,
                                        # never outputs/<run>/adapter (lambda is baked into
                                        # that one). cfg.lora is ignored when this is set
+  checkpoint_steps: null              # save checkpoints/step-N every N steps without
+                                       # evaluating; null = only on eval rounds
   early_stopping_patience: 3          # stop after this many eval rounds with no ValCER
                                        # improvement; null = never stop early (needed when
                                        # the checkpoint is picked by something ValCER cannot

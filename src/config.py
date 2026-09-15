@@ -83,6 +83,12 @@ class Training:
     eval_steps: int | None = None   # eval + checkpoint every N steps. null = once per
                                 # epoch, which on a 1-epoch run means a single eval at
                                 # the very end and no recoverable checkpoint before it.
+    checkpoint_steps: int | None = None   # save checkpoints/step-N every N steps, without
+                                # evaluating. Decoupled from eval_steps because a val split
+                                # large enough to read (1,179 segments, ~7 min a round) makes
+                                # one eval cost ten times what saving an adapter costs, and
+                                # the retention-vs-steps curve needs the adapters, not the
+                                # val CER rows. null = save only on eval rounds.
     early_stopping_patience: int | None = 3   # stop after this many eval rounds with no
                                 # val-CER improvement. null = never stop early -- for a
                                 # run whose deliverable is the LAST step rather than the
@@ -216,6 +222,8 @@ def validate(cfg: Config, stage: str | None = None) -> None:
         raise ValueError("training.limit must be a positive int or null")
     if cfg.training.eval_steps is not None and cfg.training.eval_steps <= 0:
         raise ValueError("training.eval_steps must be a positive int or null")
+    if cfg.training.checkpoint_steps is not None and cfg.training.checkpoint_steps <= 0:
+        raise ValueError("training.checkpoint_steps must be a positive int or null")
     if (cfg.training.early_stopping_patience is not None
             and cfg.training.early_stopping_patience <= 0):
         raise ValueError("training.early_stopping_patience must be a positive int or null "
