@@ -8,3 +8,6 @@ __pycache__/
 .pytest_cache/
 .env
 pretrained_models/
+
+# Corpus add-on tar built by scripts/build_v6_corpus_addon.py (1.6 GB, lives on HF)
+v6-corpus-addon.tar
