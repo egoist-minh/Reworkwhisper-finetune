@@ -77,6 +77,14 @@ Máy Windows hết chỗ, nên **không chép zip về**: ba adapter đáng gi�
 phần còn lại bỏ cùng máy thuê. Chỉ scp `run.log`, `outputs/<run>/metrics/` và thư mục
 bench về.
 
+Nhưng cả hai đường trên đều chỉ chạy **sau** khi train xong, mà máy thuê có thể tắt giữa
+chừng — hết hạn mức, bị thu hồi. Lượt dừng ở bước 3.000 thì không còn gì.
+`scripts/push_checkpoints_live.py` chạy song song trong tmux, cứ 120 giây quét
+`checkpoints/` và đẩy `step-<N>` mới lên một repo private, mỗi cái một thư mục con. Nó
+không đụng vào tiến trình train và không bao giờ raise ra ngoài, nên lỗi mạng ở đây không
+giết được lượt chạy. `best/` không cần đẩy: `on_evaluate` ghi `best/` và `step-<N>` từ
+cùng một model trong cùng một lệnh, nên mọi `best/` đều trùng byte với một `step-<N>`.
+
 **Verify:** `pytest tests/` — xanh, cộng một test mới chặn đúng rủi ro đắt nhất:
 `archive_run` phải giữ `checkpoints/step-*` (lọc của nó chỉ bỏ `checkpoint-<số>`). Mất
 bước đó là cả lượt thuê không còn gì để chấm.

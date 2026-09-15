@@ -202,13 +202,25 @@ python -m src.pipeline --stage train   $SMOKE
 ls outputs/smoke-steps/checkpoints/
 ```
 
-**Hai cổng, phải qua cả hai:**
+**Ba cổng, phải qua cả ba:**
 
 1. Nhiều hơn một thư mục `step-<số>` cạnh `best/`. Chỉ thấy `best/` là `on_evaluate` chưa
    lưu vô điều kiện.
 2. Có một `step-<số>` ứng với **bước cuối**, không phải bội số của `eval_steps` — đó là
-   `on_train_end` ([src/train.py:366](../src/train.py#L366)). Thiếu nó thì checkpoint
+   `on_train_end` ([src/train.py:369](../src/train.py#L369)). Thiếu nó thì checkpoint
    "last" không tồn tại và §8 không có gì để đẩy lên.
+3. Watcher đẩy được lên Hub — chạy một lượt quét trên chính thư mục smoke:
+
+   ```bash
+   PYTHONPATH=. .venv/bin/python -m scripts.push_checkpoints_live \
+       --run-dir outputs/smoke-steps \
+       --repo-id rework-whisper-v6-org/smoke-steps-checkpoints \
+       --settle 0 --once
+   ```
+
+   Phải in ra ít nhất một dòng `step-<số>: https://…`. In `upload failed` là token thiếu
+   quyền ghi hoặc sai org — biết ở đây tốn 1 phút, biết sau lượt 96 phút thì mất cả lượt.
+   Xoá repo `smoke-steps-checkpoints` trên Hub sau khi qua cổng.
 
 Sai cổng nào thì dừng, sửa xong mới chạy lượt thật.
 
@@ -241,6 +253,36 @@ tmux new-session -d -s run "bash -lc '
   python -m src.pipeline --stage train   $OV
 ' > run.log 2>&1; echo EXIT=\$? >> run.log"
 ```
+
+**Bật ngay watcher đẩy checkpoint lên Hub**, cùng lúc với lệnh trên — máy thuê có thể tắt
+giữa chừng (hết hạn mức, bị thu hồi), và `outputs/` đi theo máy:
+
+```bash
+tmux new-session -d -s push "bash -lc '
+  cd ~/speech/Fine_tune_wf && source .venv/bin/activate
+  export PYTHONPATH=. HF_TOKEN=$HF_TOKEN
+  python -m scripts.push_checkpoints_live \
+      --run-dir outputs/$R \
+      --repo-id rework-whisper-v6-org/$R-checkpoints
+' > push.log 2>&1"
+
+tail -5 push.log      # sau vòng eval đầu phải thấy dòng step-400
+```
+
+Cứ 120 giây nó quét `checkpoints/`, thấy `step-<N>` mới thì đẩy lên một thư mục con cùng
+tên trong repo private đó. Một thư mục chỉ được đẩy khi có đủ `adapter_config.json` +
+`adapter_model.safetensors` và 60 giây không ai chạm vào — đẩy giữa lúc PEFT còn đang ghi
+là đưa lên Hub một adapter cụt dưới cái tên đọc như bản hoàn chỉnh. Upload hỏng thì thử
+lại vòng sau; tiến trình này không bao giờ raise ra ngoài, nên nó chết âm thầm là rủi ro
+duy nhất — vì vậy `tail push.log` mỗi lần ngó `run.log`.
+
+Không cần đẩy `checkpoints/best/`: `on_evaluate` ghi `best/` và `step-<N>` từ cùng một
+model trong cùng một lệnh ([src/train.py:362](../src/train.py#L362)), nên mọi `best/` từng
+tồn tại đều trùng byte với một `step-<N>` đã lên.
+
+Máy chết ở bước 3.000 thì cái mất là 3.000 bước GPU sau đó, không phải toàn bộ lượt: các
+điểm `step-400`/`800`/`1.600` mà §6 đặt cược đã nằm trên Hub. Tải về bằng
+`huggingface_hub.snapshot_download(repo_id, allow_patterns='step-800/*')`.
 
 `lora.rank` giữ mặc định 16 của config (`alpha` 32) — đó là hình dạng của v5, và là lý do
 lượt này so được với v5. Không thêm override rank.
@@ -334,8 +376,18 @@ Nếu thiếu thời gian: bỏ `vimedcss-test` (1.612 segment, −15 phút), gi
 
 Đã mất một lượt đo vì chép muộn. Làm ngay khi §6 xong, đừng đợi §7.
 
-Máy Windows hết chỗ, nên **18 adapter không chép về** — ba cái đáng giữ đi thẳng lên Hub,
-phần còn lại bỏ cùng máy thuê. Chạy **trên máy thuê**:
+Watcher ở §5 đã đẩy sẵn cả 17 `step-*` lên repo `-checkpoints` trong lúc train; mục này
+tách riêng **ba bản đáng giữ** sang ba repo có tên đọc được, để sau này không ai phải tra
+lại xem `step-1600` là cái gì. Trước khi chạy, quét nốt phần watcher chưa kịp (`step-6402`
+vừa sinh ra ở cuối lượt):
+
+```bash
+PYTHONPATH=. .venv/bin/python -m scripts.push_checkpoints_live \
+    --run-dir outputs/v6-100h-steps \
+    --repo-id rework-whisper-v6-org/v6-100h-steps-checkpoints --once
+```
+
+Máy Windows hết chỗ, nên **18 adapter không chép về**. Chạy **trên máy thuê**:
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m scripts.push_run_adapters \

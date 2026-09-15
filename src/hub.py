@@ -10,9 +10,13 @@ from pathlib import Path
 
 
 def push_adapter(adapter_dir: str | Path, repo_id: str, private: bool = True,
-                  gate_results: dict | None = None) -> str:
+                  gate_results: dict | None = None,
+                  path_in_repo: str | None = None) -> str:
     """Uploads `adapter_dir` (already contains adapter_config.json + weights,
-    written by src.lora.save_with_lambda) to `repo_id`. Returns the repo URL."""
+    written by src.lora.save_with_lambda) to `repo_id`. `path_in_repo` puts it
+    in a subfolder instead of the repo root, so one repo can hold several
+    adapters -- scripts/push_checkpoints_live.py parks a run's every checkpoint
+    that way. Returns the repo URL."""
     from huggingface_hub import HfApi
 
     adapter_dir = Path(adapter_dir)
@@ -23,7 +27,8 @@ def push_adapter(adapter_dir: str | Path, repo_id: str, private: bool = True,
         (adapter_dir / "README.md").write_text(
             _model_card(repo_id, gate_results), encoding="utf-8")
 
-    api.upload_folder(folder_path=str(adapter_dir), repo_id=repo_id)
+    api.upload_folder(folder_path=str(adapter_dir), repo_id=repo_id,
+                      path_in_repo=path_in_repo)
     return f"https://huggingface.co/{repo_id}"
 
 
