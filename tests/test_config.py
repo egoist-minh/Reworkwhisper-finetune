@@ -24,6 +24,16 @@ def test_training_limit_positive_is_valid():
     validate(_cfg(limit=20))  # should not raise
 
 
+def test_early_stopping_patience_null_is_valid():
+    validate(_cfg(early_stopping_patience=None))  # null = never stop early
+
+
+def test_early_stopping_patience_zero_or_negative_rejected():
+    # 0 reads as "no patience at all"; null is the way to disable the check.
+    with pytest.raises(ValueError, match="early_stopping_patience"):
+        validate(_cfg(early_stopping_patience=0))
+
+
 def test_training_limit_zero_or_negative_rejected():
     with pytest.raises(ValueError):
         validate(_cfg(limit=0))

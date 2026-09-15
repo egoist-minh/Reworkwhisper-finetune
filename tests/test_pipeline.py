@@ -148,6 +148,8 @@ def _run_dir(tmp_path):
     (out / "checkpoints" / "best" / "adapter_model.safetensors").write_text("w", encoding="utf-8")
     (out / "checkpoints" / "checkpoint-200").mkdir(parents=True)
     (out / "checkpoints" / "checkpoint-200" / "optimizer.pt").write_text("big", encoding="utf-8")
+    (out / "checkpoints" / "step-800").mkdir(parents=True)
+    (out / "checkpoints" / "step-800" / "adapter_model.safetensors").write_text("w", encoding="utf-8")
     return out
 
 
@@ -164,6 +166,9 @@ def test_archive_keeps_results_and_model_drops_resume_state(tmp_path):
     assert "v6-x/checkpoints/best/adapter_model.safetensors" in names
     # Optimizer state is for --resume on THIS box; useless once it is released.
     assert not any("checkpoint-200" in n for n in names)
+    # step-N adapters are the per-eval-round saves scored for retention after the
+    # run -- dropping them would leave the rented box with nothing to score.
+    assert "v6-x/checkpoints/step-800/adapter_model.safetensors" in names
 
 
 def test_archive_lands_next_to_the_run_directory(tmp_path):

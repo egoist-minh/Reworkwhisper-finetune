@@ -61,13 +61,14 @@ def done_ids(path: Path) -> set[str]:
 class HFBackend:
     """Whisper-family checkpoint on the local GPU. Loaded once per process."""
 
-    def __init__(self, model: str, batch_size: int, language: str, num_beams: int):
+    def __init__(self, model: str, batch_size: int, language: str, num_beams: int,
+                 adapter: str | None = None):
         from src import compat
 
         compat.apply()
         from src.asr import load_for_eval
 
-        self.model, self.processor = load_for_eval(model)
+        self.model, self.processor = load_for_eval(model, adapter)
         self.batch_size = batch_size
         self.language = language
         self.num_beams = num_beams
@@ -185,6 +186,10 @@ def main() -> None:
     ap.add_argument("--backend", required=True, choices=["hf", "elevenlabs"])
     ap.add_argument("--model", required=True,
                     help="HF repo id (hf backend) or ElevenLabs model_id, e.g. scribe_v2")
+    ap.add_argument("--adapter", default=None,
+                    help="hf backend only: PEFT adapter dir loaded on top of --model, for "
+                         "benchmarking a run's checkpoint without merging and publishing it "
+                         "first (e.g. outputs/<run>/checkpoints/step-800)")
     ap.add_argument("--suites", required=True,
                     help="comma-separated suite names, see scripts/benchmark_suites.py")
     ap.add_argument("--path", action="append", default=[], metavar="SUITE=DIR",
@@ -198,6 +203,8 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=None, help="first N segments per suite (smoke run)")
     ap.add_argument("--force", action="store_true", help="ignore existing output and re-decode")
     args = ap.parse_args()
+    if args.adapter and args.backend != "hf":
+        ap.error("--adapter is hf-backend only")
 
     sys.stdout.reconfigure(encoding="utf-8")
     out_dir = Path(args.out)
@@ -212,7 +219,8 @@ def main() -> None:
         print(f"suite {s}: {len(segs)} segments, {sum(x.duration for x in segs) / 3600:.2f} h")
 
     if args.backend == "hf":
-        backend = HFBackend(args.model, args.batch_size, args.language or "vi", args.num_beams)
+        backend = HFBackend(args.model, args.batch_size, args.language or "vi", args.num_beams,
+                            args.adapter)
         batch_size = args.batch_size
     else:
         pending = sum(s.duration for suite, segs in loaded.items() for s in segs
@@ -222,8 +230,15 @@ def main() -> None:
         backend = ElevenLabsBackend(args.model, args.language or "vie")
         batch_size = 1
 
+    # An adapter must reach the filename: the output stem is the only thing
+    # telling two runs apart, and done_ids() resumes off it. Decoding
+    # base+adapter under the bare base name would look "already done" against an
+    # earlier base-only run and silently report the base model's hypotheses as
+    # the adapter's.
+    label = f"{args.model}+{args.adapter}" if args.adapter else args.model
+
     for suite in suites:
-        run_suite(backend, args.model, suite, loaded[suite], out_dir, batch_size, args.force)
+        run_suite(backend, label, suite, loaded[suite], out_dir, batch_size, args.force)
 
     print(f"\nwrote {out_dir}. Score with:\n"
           f"  python -m scripts.benchmark_report --dir {out_dir}")

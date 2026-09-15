@@ -197,6 +197,16 @@ def test_replay_restores_the_patience_counter_exactly():
     assert s.update(0.27) is True   # third round without improvement
 
 
+def test_patience_none_never_stops_however_long_val_cer_plateaus():
+    # A run whose deliverable is the last step, not the best val CER: stopping on
+    # a metric nothing will be selected by would cost the paid-for steps that the
+    # retention curve needs (docs/v6-100h-steps-plan.md).
+    s = _EarlyStoppingState(patience=None)
+    s.replay([0.30, 0.20])
+    assert all(s.update(v) is False for v in (0.25, 0.26, 0.27, 0.28))
+    assert s.best == 0.20          # still tracks best, it just never stops
+
+
 # --------------------------------------- _attach_adapter (curriculum phase 2)
 # peft/torch are not installed on the machine these tests run on, so the branch
 # is exercised against a stub module -- what matters here is WHICH call is made

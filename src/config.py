@@ -83,6 +83,13 @@ class Training:
     eval_steps: int | None = None   # eval + checkpoint every N steps. null = once per
                                 # epoch, which on a 1-epoch run means a single eval at
                                 # the very end and no recoverable checkpoint before it.
+    early_stopping_patience: int | None = 3   # stop after this many eval rounds with no
+                                # val-CER improvement. null = never stop early -- for a
+                                # run whose deliverable is the LAST step rather than the
+                                # best val CER (docs/v6-100h-steps-plan.md: the checkpoint
+                                # is picked afterwards by cross-domain retention, which
+                                # val CER cannot see, and late rounds differ by ~0.01pp,
+                                # inside the noise of a val_limit-capped split).
     init_adapter: str | None = None   # continue training from an existing PEFT adapter
                                 # directory instead of injecting a fresh LoRA (curriculum
                                 # phase 2, docs/v6-curriculum-plan.md). rank/alpha/
@@ -209,6 +216,10 @@ def validate(cfg: Config, stage: str | None = None) -> None:
         raise ValueError("training.limit must be a positive int or null")
     if cfg.training.eval_steps is not None and cfg.training.eval_steps <= 0:
         raise ValueError("training.eval_steps must be a positive int or null")
+    if (cfg.training.early_stopping_patience is not None
+            and cfg.training.early_stopping_patience <= 0):
+        raise ValueError("training.early_stopping_patience must be a positive int or null "
+                          "(null disables early stopping)")
     # Fail here rather than after a model download: a mistyped adapter path is
     # otherwise only discovered once train() is already holding the base model.
     if cfg.training.init_adapter is not None:

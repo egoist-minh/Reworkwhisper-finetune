@@ -71,7 +71,7 @@ class _EarlyStoppingState:
     actually present in that eval round, so this never has to guess at HF's
     internal metric-key naming."""
 
-    def __init__(self, patience: int, greater_is_better: bool = False):
+    def __init__(self, patience: int | None, greater_is_better: bool = False):
         self.patience = patience
         self.greater_is_better = greater_is_better
         self.best: float | None = None
@@ -101,7 +101,7 @@ class _EarlyStoppingState:
             self.rounds_without_improvement = 0
         else:
             self.rounds_without_improvement += 1
-        return self.rounds_without_improvement >= self.patience
+        return self.patience is not None and self.rounds_without_improvement >= self.patience
 
 
 def _make_compute_metrics(processor, normalizer: Normalizer):
@@ -322,7 +322,8 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path,
 
     step_timing = StepTimingCallback()
 
-    stopping = _EarlyStoppingState(patience=3, greater_is_better=False)
+    stopping = _EarlyStoppingState(patience=cfg.training.early_stopping_patience,
+                                    greater_is_better=False)
     best_dir = out / "checkpoints" / "best"
 
     class RobustEvalTrackingCallback(TrainerCallback):
@@ -349,6 +350,13 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path,
             if metrics is None or "eval_val_cer" not in metrics:
                 return control
             should_stop = stopping.update(metrics["eval_val_cer"])
+            # Every round, not just the improving ones: loanword retention is not
+            # in the loss and not in eval_val_cer, so the checkpoint that holds it
+            # best is not knowable until each one is scored on cross-domain audio
+            # after the run (docs/v6-100h-steps-plan.md §1.1, §3a). Named step-N so
+            # archive_run keeps them -- its filter only drops Trainer's own
+            # checkpoint-N optimizer state.
+            model.save_pretrained(str(out / "checkpoints" / f"step-{state.global_step}"))
             if stopping.rounds_without_improvement == 0:
                 model.save_pretrained(str(best_dir))
             if should_stop:

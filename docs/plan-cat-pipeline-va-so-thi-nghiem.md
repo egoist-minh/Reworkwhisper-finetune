@@ -45,9 +45,18 @@ Verify đã chạy (máy local, CPU-only, không có torch/peft):
 
 Còn phải làm, theo thứ tự:
 
-1. §1.2 verify thật (bảng eval in đủ dòng, `training_log.csv` đúng cột) — chờ máy GPU.
-2. §2 sổ thí nghiệm — chưa bắt đầu.
-3. §3 git — chưa bắt đầu.
+1. ~~**`docs/v6-100h-steps-plan.md` §1.1** — lưu adapter ở mọi vòng eval~~ — **xong 15/09**,
+   cùng với §1.3 (tắt được early stopping) và §1.4 (`benchmark_run --adapter`) phát sinh khi
+   rà lại plan đó. Xem trạng thái ở chính file kia.
+2. §1.2 verify thật (bảng eval in đủ dòng, `training_log.csv` đúng cột) — chờ máy GPU.
+   Gộp chung với lượt train tí hon của `v6-100h-steps-plan.md` §1.1, cùng một lệnh.
+3. ~~§2 sổ thí nghiệm~~ — **xong**, `experiments/task_ledger.md` (commit `39e0117`).
+4. ~~§3 git~~ — **xong**, 4 commit + merge `h200-server-run` vào `main` (`aa51276`).
+
+**Lượt thuê tiếp theo đã chốt: `docs/v6-100h-steps-plan.md`** (15/09). Lượt 101 h ở cấu
+hình công bằng professor yêu cầu, `eval_steps=800` giữ mọi checkpoint, sàng bằng
+cross-domain rồi benchmark đầy đủ 5 suite cho bản thắng. Plan này (§1) là điều kiện cần
+của nó.
 
 ---
 
