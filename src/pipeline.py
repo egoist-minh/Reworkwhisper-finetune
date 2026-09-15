@@ -11,8 +11,12 @@ each stage assumes prior stages' artifacts already exist on disk):
                    patch, one forward pass. No GPU, no download. Run this
                    before ANY Kaggle GPU session (see CLAUDE.md memory:
                    Kaggle code never works first try).
-    baseline    -- Stage 1: validate manifest, eval base model, write
-                   metrics/baseline.json.
+    prepare     -- Stage 1a: freeze the config and resolve the corpus into
+                   validated_manifest.jsonl, which train reads. CPU, seconds.
+    baseline    -- Stage 1: prepare, then eval the base model and write
+                   metrics/baseline.json. Skippable when the base model's
+                   numbers already exist from an earlier run -- it never
+                   changes, so `prepare` alone is enough to reach train.
     train       -- Stage 2: SFT training -> checkpoints/best/. `--resume`
                    continues from the newest checkpoints/checkpoint-<step>;
                    without it, finding one at all is an error rather than an
@@ -133,12 +137,16 @@ def stage_smoke(cfg) -> None:
     """No GPU, no network. Proves config + data + normalization + compat
     patch all work before spending Kaggle GPU time on anything else."""
     from src import compat
-    from src.data import load_manifests, resolve_splits, split_stats
+    from src.data import load_manifests, resolve_splits, split_stats, load_excluded_segments, filter_excluded
 
     versions = compat.apply()
     print("compat:", versions["neutralized"])
 
     records = load_manifests(cfg.data.dataset_path)
+    if cfg.data.exclude_manifest:
+        excluded = load_excluded_segments(cfg.data.exclude_manifest)
+        records = filter_excluded(records, excluded)
+        print(f"excluded {len(excluded)} segment(s) via {cfg.data.exclude_manifest}")
     resolved = resolve_splits(records, cfg.data.val_meetings)
     stats = split_stats(resolved)
     print("split_stats:", stats)
@@ -154,22 +162,47 @@ def stage_smoke(cfg) -> None:
     print("SMOKE OK")
 
 
-def stage_baseline(cfg) -> Path:
+def stage_prepare(cfg) -> Path:
+    """CPU-only half of what `baseline` used to do: freeze the config and
+    resolve the corpus into `validated_manifest.jsonl`, which `train` reads.
+
+    Split out so a run can skip the base-model decode: that decode costs ~8
+    GPU minutes to re-measure a model that never changes, and the numbers
+    already exist in Outputs/benchmark-2026-09-10/. Seconds, no GPU, no
+    download. Returns the manifest path.
+    """
     from src.data import (load_manifests, resolve_splits, split_stats,
-                           write_validated_manifest, ManifestDataset)
-    from src.asr import load_for_eval
-    from src.gate import _eval_split, write_predictions
+                           write_validated_manifest,
+                           load_excluded_segments, filter_excluded)
 
     out = cfg.out_dir
     freeze(cfg, out / "config.json")
 
     records = load_manifests(cfg.data.dataset_path)
+    if cfg.data.exclude_manifest:
+        excluded = load_excluded_segments(cfg.data.exclude_manifest)
+        records = filter_excluded(records, excluded)
+        print(f"excluded {len(excluded)} segment(s) via {cfg.data.exclude_manifest}")
     resolved = resolve_splits(records, cfg.data.val_meetings)
-    write_validated_manifest(resolved, out / "validated_manifest.jsonl")
+    manifest_path = write_validated_manifest(resolved, out / "validated_manifest.jsonl")
     stats = split_stats(resolved)
     (out / "metrics").mkdir(parents=True, exist_ok=True)
     (out / "metrics" / "split_stats.json").write_text(
         json.dumps(stats, indent=2), encoding="utf-8")
+    print("split_stats:", stats)
+    _write_state(out, "prepare")
+    return manifest_path
+
+
+def stage_baseline(cfg) -> Path:
+    from src.data import ManifestDataset
+    from src.asr import load_for_eval
+    from src.gate import _eval_split, write_predictions
+
+    out = cfg.out_dir
+    stage_prepare(cfg)
+    resolved = [json.loads(l) for l
+                in (out / "validated_manifest.jsonl").read_text(encoding="utf-8").splitlines()]
 
     normalizer = Normalizer(
         strip_punctuation=cfg.normalization.strip_punctuation,
@@ -272,7 +305,9 @@ def stage_train(cfg, resume: bool = False) -> Path:
 
     manifest_path = out / "validated_manifest.jsonl"
     if not manifest_path.exists():
-        raise FileNotFoundError(f"{manifest_path} missing -- run stage baseline first")
+        raise FileNotFoundError(
+            f"{manifest_path} missing -- run stage prepare first (or baseline, "
+            "which does prepare's work plus the base-model decode)")
 
     records = [json.loads(l) for l in manifest_path.read_text(encoding="utf-8").splitlines()]
     audio_root = Path(cfg.data.dataset_path) / "audio"
@@ -450,6 +485,7 @@ def _write_sweep_csv(rows: list[dict], out_path: Path) -> Path:
 
 STAGES = {
     "smoke": stage_smoke,
+    "prepare": stage_prepare,
     "baseline": stage_baseline,
     "train": stage_train,
     "sweep-gate": stage_sweep_gate,
@@ -481,7 +517,7 @@ def main() -> None:
                           "starting over")
     args = ap.parse_args()
 
-    cfg = load(args.config, overrides=args.override)
+    cfg = load(args.config, overrides=args.override, stage=args.stage)
     from src import compat
     compat.apply()  # must run before any peft import -- see compat.py
     _quiet_known_noise()

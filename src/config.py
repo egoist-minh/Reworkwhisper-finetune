@@ -29,6 +29,10 @@ class Data:
     # a loanword regression. Null = the cross-domain check does not run.
     cross_domain_path: str | None = None
     val_meetings: list[str] = field(default_factory=list)
+    # QC jsonl (e.g. scripts/qc_v6_youtube.py's export) whose verdict=="bo" rows
+    # name segments to drop from training -- by (meeting_id, segment_id), never
+    # by editing the corpus manifest itself. Null = no exclusion applied.
+    exclude_manifest: str | None = None
 
 
 @dataclass
@@ -189,7 +193,10 @@ def apply_override(raw: dict, expr: str) -> None:
     cur[path[-1]] = yaml.safe_load(val)
 
 
-def validate(cfg: Config) -> None:
+def validate(cfg: Config, stage: str | None = None) -> None:
+    """`stage` scopes the checks that only matter to one stage; None (the
+    default) applies every check, so callers that do not know the stage keep
+    the strict behaviour."""
     bad = set(t.lower() for t in cfg.normalization.filler_tokens) & LEXICAL_PARTICLES
     if bad:
         raise ValueError(f"filler_tokens contains lexical particles {sorted(bad)} -- "
@@ -242,7 +249,11 @@ def validate(cfg: Config) -> None:
     # only one) and every sweep row's ood_cer is None, so select_lambda finds no
     # budget-safe lambda and hard-fails -- but only AFTER training and five val
     # decodes have already been paid for. Fail here instead.
-    if not cfg.data.ood_eval_path:
+    # Only sweep-gate consumes it: stage_train treats ood_ds as optional and
+    # stage_baseline skips its OOD decode when the path is null. A train-only
+    # run therefore has no use for VIVOS, and demanding it would cost a fetch
+    # (and a way to die) on a rented box for a split nothing reads.
+    if stage in (None, "sweep-gate") and not cfg.data.ood_eval_path:
         raise ValueError(
             "data.ood_eval_path is unset -- tier 2 (OOD) is the only forgetting "
             "measurement in the gate, and sweep-gate would hard-fail in "
@@ -263,12 +274,13 @@ def validate(cfg: Config) -> None:
         raise ValueError("hub.push is true but hub.repo_id is unset")
 
 
-def load(path: str | Path, overrides: list[str] | None = None) -> Config:
+def load(path: str | Path, overrides: list[str] | None = None,
+         stage: str | None = None) -> Config:
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     for expr in overrides or []:
         apply_override(raw, expr)
     cfg = _build(Config, raw)
-    validate(cfg)
+    validate(cfg, stage=stage)
     return cfg
 
 

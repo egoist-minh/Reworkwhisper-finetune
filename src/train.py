@@ -358,13 +358,18 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path,
     class TrainingDisplayCallback(TrainerCallback):
         """One tqdm bar for the whole run + one table row per eval round (val+ood
         merged), replacing HF's default per-split bars that redraw on top of each
-        other and the raw metrics-dict prints. `eval_dataset` is {"val":.., "ood":..}
-        (fixed order), so a row is flushed once an `eval_ood_*` key shows up --
-        that's always the second/last on_evaluate call of the round."""
+        other and the raw metrics-dict prints.
+
+        With an ood split, `eval_dataset` is {"val":.., "ood":..} (fixed order),
+        so a row is flushed once an `eval_ood_*` key shows up -- always the
+        second/last on_evaluate call of the round. Without one, `eval_val_cer`
+        is the last key of the round and flushes the row itself; wait for an ood
+        key that never arrives and the table prints nothing at all."""
 
         _ROW_FMT = "{:>7}{:>8}{:>12}{:>10}{:>9}{:>9}{:>10}"
 
-        def __init__(self):
+        def __init__(self, has_ood: bool = True):
+            self.has_ood = has_ood
             self.bar = None
             self.eval_bar = None
             self.last_train_loss = None
@@ -399,7 +404,7 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path,
             if self.eval_bar is None:
                 from tqdm.auto import tqdm
 
-                split = "ood" if self._pending else "val"
+                split = "ood" if (self.has_ood and self._pending) else "val"
                 self.eval_bar = tqdm(desc=f"eval:{split}", unit="batch",
                                       position=1, leave=False)
             self.eval_bar.update(1)
@@ -436,7 +441,9 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path,
             if not metrics:
                 return control
             self._pending.update(metrics)
-            if not any(k.startswith("eval_ood") for k in metrics):
+            done = (any(k.startswith("eval_ood") for k in metrics) if self.has_ood
+                    else "eval_val_cer" in metrics)
+            if not done:
                 return control
             row = self._ROW_FMT.format(
                 f"{state.epoch:.1f}",
@@ -445,7 +452,8 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path,
                 f"{self._pending.get('eval_val_loss', float('nan')):.3f}",
                 f"{self._pending.get('eval_val_cer', float('nan')):.4f}",
                 f"{self._pending.get('eval_val_wer', float('nan')):.4f}",
-                f"{self._pending.get('eval_ood_cer', float('nan')):.4f}",
+                f"{self._pending.get('eval_ood_cer', float('nan')):.4f}"
+                if self.has_ood else "-",
             )
             from tqdm.auto import tqdm
             tqdm.write(row)
@@ -460,10 +468,12 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path,
         model=model,
         args=args,
         train_dataset=train_ds,
-        eval_dataset={"val": val_ds, "ood": ood_ds},
+        eval_dataset=({"val": val_ds, "ood": ood_ds} if ood_ds is not None
+                       else {"val": val_ds}),
         data_collator=WhisperCollator(processor),
         compute_metrics=_make_compute_metrics(processor, normalizer),
-        callbacks=[RobustEvalTrackingCallback(), TrainingDisplayCallback(),
+        callbacks=[RobustEvalTrackingCallback(),
+                   TrainingDisplayCallback(has_ood=ood_ds is not None),
                    step_timing],
     )
     # disable_tqdm=True makes Trainer default-add PrinterCallback, which dumps every

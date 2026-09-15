@@ -39,6 +39,30 @@ def load_manifests(dataset_path: str | Path) -> list[dict]:
     return records
 
 
+def load_excluded_segments(path: str | Path) -> set[tuple[str, str]]:
+    """Read a QC export jsonl and return the (meeting_id, segment_id) pairs
+    marked verdict=="bo" (loại bỏ) -- e.g. scripts/qc_v6_youtube.py's export.
+    Rows with any other verdict (including blank/unreviewed) are ignored here."""
+    excluded = set()
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            r = json.loads(line)
+            if r.get("verdict") == "bo":
+                excluded.add((r["meeting_id"], r["segment_id"]))
+    return excluded
+
+
+def filter_excluded(records: list[dict], excluded: set[tuple[str, str]]) -> list[dict]:
+    """Drop records named in `excluded` -- corpus files on disk are untouched,
+    this only shrinks what reaches training/eval in memory."""
+    if not excluded:
+        return records
+    return [r for r in records if (r["meeting_id"], r["segment_id"]) not in excluded]
+
+
 def resolve_splits(records: list[dict], val_meetings: list[str]) -> list[dict]:
     """Return records with `split` overwritten by the resolved train/val/test.
 

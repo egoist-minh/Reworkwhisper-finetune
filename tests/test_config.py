@@ -39,6 +39,19 @@ def test_null_ood_eval_path_rejected_before_any_gpu_time():
         validate(cfg)
 
 
+def test_null_ood_eval_path_allowed_for_train_stage():
+    # prepare/train/benchmark stages never read ood_eval_path -- only
+    # sweep-gate (and the default, stage=None) still need it up front.
+    cfg = Config(run_id="t", base_model="m", data=Data(dataset_path="d"))
+    validate(cfg, stage="train")  # should not raise
+
+
+def test_null_ood_eval_path_still_rejected_for_sweep_gate_stage():
+    cfg = Config(run_id="t", base_model="m", data=Data(dataset_path="d"))
+    with pytest.raises(ValueError, match="ood_eval_path"):
+        validate(cfg, stage="sweep-gate")
+
+
 # --------------------------------------------- training.init_adapter (curriculum phase 2)
 
 
