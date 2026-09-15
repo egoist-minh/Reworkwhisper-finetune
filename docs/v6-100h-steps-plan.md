@@ -68,9 +68,11 @@ song với `best`:
 model.save_pretrained(str(out / "checkpoints" / f"step-{state.global_step}"))
 ```
 
-Adapter rank 16 là ~115 MB; 8 vòng là ~1 GB. `archive_run` loại thư mục tên
-`checkpoint-<số>` (optimizer state của Trainer) — `step-<số>` **không** khớp bộ lọc đó nên
-tự động đi vào zip. Zip sẽ to thêm ~1 GB; đó là giá của việc có gì để chấm.
+Adapter rank 16 là 115.487.384 byte (đo trên `Outputs/v3-r16/adapter/`), nên 16 vòng là
+**~1,85 GB**. `archive_run` loại thư mục tên `checkpoint-<số>` (optimizer state của
+Trainer) — `step-<số>` **không** khớp bộ lọc đó nên tự động đi vào zip. Zip to thêm ~1,85 GB
+(safetensors không nén, `archive_run` chạy compresslevel=1); đó là giá của việc có gì để
+chấm, và scp vẫn nằm trong 10 phút đã tính ở §4.
 
 **Verify:** `pytest tests/` — xanh, cộng một test mới chặn đúng rủi ro đắt nhất:
 `archive_run` phải giữ `checkpoints/step-*` (lọc của nó chỉ bỏ `checkpoint-<số>`). Mất
@@ -103,7 +105,7 @@ cải thiện là `control.should_training_stop = True`.
 
 Đơn điệu giảm, nhưng khoảng cách vòng 4→5 của `-15h` chỉ **0,014 pp**. Cắt val còn 100
 segment (27% số segment) thì nhiễu lớn hơn ~1,9 lần, thừa sức nuốt một khoảng cách cỡ đó —
-và lượt này có 8 vòng, tức plateau cuối dài hơn hẳn. Dừng sớm ở bước ~3.200 là mất **cả
+và lượt này có 16 vòng, tức plateau cuối dài hơn hẳn. Dừng sớm ở bước ~3.200 là mất **cả
 hai** deliverable: số cuối cho professor, và hai điểm cuối của đường cong retention.
 
 **Thay đổi:** `training.early_stopping_patience`, mặc định `3` (đúng hành vi cũ, không
@@ -142,7 +144,7 @@ Cấu hình công bằng — giống v5 ở mọi thứ trừ corpus, để so �
 | `batch` × `grad_accum` | 16 × 1 | batch hiệu dụng 16, bằng v5 |
 | `gradient_checkpointing` | false | chỉ T4 cần |
 | `init_adapter` | null | LoRA tươi. Curriculum hai pha đã đo và thua (`v6-dense-{1,3,4}`) |
-| `eval_steps` | **800** | 8 vòng trên 6.558 bước; mỗi vòng lưu một adapter |
+| `eval_steps` | **400** | 16 vòng trên 6.558 bước; mỗi vòng lưu một adapter |
 | `training.val_limit` | **100** | vòng eval chỉ còn tồn tại để **kích hoạt việc lưu checkpoint**. Chọn checkpoint giờ theo retention cross-domain, không theo ValCER — nên không cần decode đủ 365 segment val mỗi vòng. Cắt mỗi vòng từ ~2,5 phút xuống ~0,7 phút |
 | `eval.batch_size` | 64 | CER lệch theo batch — mọi phép đo trong lượt phải cùng số này |
 | `data.ood_eval_path` | null | không stage nào đọc nữa sau §1.3 của plan kia |
@@ -155,9 +157,18 @@ test 654**. Card ghi 34.525 — chênh 447 segment, đúng kiểu sai lệch đ�
 và manifest. Hệ quả: **6.558 bước** (không phải 6.474), tức +84 bước ≈ +1 phút. 2.186
 bước/epoch khớp đúng con số của `v6-corpus-r32` trong bảng §0, nên hai lượt so được.
 
-Tám vòng eval rơi vào **800, 1.600, 2.400, 3.200, 4.000, 4.800, 5.600, 6.400** — cả bốn
-checkpoint §3a cần vẫn tồn tại. Bước cuối 6.558 không có vòng eval, nên **checkpoint muộn
-nhất là `step-6400`**, không phải bước cuối cùng; chênh 158 bước, nói đúng tên khi trình số.
+Mười sáu vòng eval rơi vào **400, 800, 1.200, … , 6.400** (bội số của 400). Bước cuối
+6.558 không có vòng eval, nên **checkpoint muộn nhất là `step-6400`**, không phải bước cuối
+cùng; chênh 158 bước, nói đúng tên khi trình số.
+
+`eval_steps=400` thay vì 800 mua hai thứ, giá 6 phút eval và ~0,9 GB đĩa:
+
+- **`step-400` và `step-800` kẹp hai bên ngân sách 801 bước của v5.** Với 800 thì chỉ có
+  một điểm trùng v5; với 400 thì trả lời được cả câu "đỉnh có nằm SỚM hơn v5 không" — mà
+  theo chính chẩn đoán ở §0 (retention giảm đơn điệu theo bước) thì `step-400` phải là
+  điểm cao nhất của cả lượt.
+- Độ phân giải gấp đôi ở đoạn dốc nhất của đường cong, tức đoạn 400–1.600, nơi ba lượt cũ
+  (801 / 1.317 / 2.157 bước) nằm chen nhau.
 
 `data.val_meetings` **giữ nguyên 4 cuộc mặc định**, không chạy `scripts/select_val_meetings.py`.
 Lý do: val lớn hơn chỉ để đọc xu hướng ValCER, mà lượt này không chọn checkpoint bằng
@@ -176,7 +187,7 @@ OV="--override run_id=$R
     --override training.learning_rate=2.0e-4
     --override training.batch_size=16 --override training.grad_accum_steps=1
     --override training.gradient_checkpointing=false
-    --override training.eval_steps=800
+    --override training.eval_steps=400
     --override training.val_limit=100
     --override training.early_stopping_patience=null
     --override eval.batch_size=64"
@@ -199,7 +210,7 @@ trước, benchmark đầy đủ chỉ cho bản thắng.**
 `scripts/score_cross_domain_model.py`, cùng đường decode chống lặp, `eval.batch_size=64`:
 
 ```bash
-for S in 800 1600 3200 6400; do
+for S in 400 800 1600 6400; do
   PYTHONPATH=. .venv/bin/python -m scripts.score_cross_domain_model \
       --model vinai/PhoWhisper-large \
       --adapter outputs/v6-100h-steps/checkpoints/step-$S \
@@ -209,9 +220,13 @@ for S in 800 1600 3200 6400; do
 done
 ```
 
-- `step-800` ← ngân sách bước của v5, trên corpus gấp 12 lần. Đặt cược ở đây
-- `step-1600`, `step-3200`
+- `step-400` ← **sớm hơn** v5. Nếu §0 đúng thì đây là retention cao nhất cả lượt
+- `step-800` ← đúng ngân sách bước của v5 (801), trên corpus gấp 12 lần. Đặt cược ở đây
+- `step-1600` ← điểm giữa, để biết đường cong dốc hay phẳng
 - `step-6400` ← checkpoint muộn nhất có eval, số professor cần (lượt kết thúc ở 6.558)
+
+12 checkpoint còn lại vẫn nằm trong zip. Nếu bốn điểm này lộ ra một đỉnh thì chấm thêm
+hàng xóm của nó — 2,5 phút một điểm, không cần train lại gì.
 
 Mỗi lần ~2,5 phút, ghi `cer` / `retention` / `no_loanword_cer` trên 299 segment. Đây là
 4 điểm của đường cong retention-theo-bước — **deliverable chính của lượt này**, có ra
@@ -269,16 +284,18 @@ theo batch, đổi batch là làm hỏng khả năng so cột.
 |---|---:|
 | dựng máy + tải `v6-corpus.tar` (14,7 GB, private HF) | 30–45 |
 | train 6.558 bước × 0,728 s | 80 |
-| eval val 8 vòng × 100 segment | 6 |
+| eval val 16 vòng × 100 segment | 12 |
 | 3a: sàng cross-domain, 4 checkpoint | 10 |
 | 3b: benchmark đầy đủ 3.223 segment, bản thắng | 30 |
 | scp `outputs/v6-100h-steps/` + `Outputs/bench-v6-100h-steps/` về | 10 |
-| **tổng** | **165–180** |
+| **tổng** | **171–186** |
 
-Sát trần 180 phút, và **biến số lớn nhất là tốc độ tải corpus**. Thứ tự cắt nếu đồng hồ
+Vượt trần 180 phút ở đầu bi quan (186), và **biến số lớn nhất vẫn là tốc độ tải corpus**
+— 15 phút chênh lệch ở dòng đầu bảng lớn hơn mọi thứ khác cộng lại. Thứ tự cắt nếu đồng hồ
 chạy chậm hơn dự kiến:
 
-1. Sàng 3 checkpoint thay vì 4 (bỏ `step-3200`) — **−2,5 phút**.
+1. Sàng 3 checkpoint thay vì 4 (bỏ `step-1600` — điểm giữa, mất ít thông tin nhất vì
+   `step-400`/`step-800`/`step-6400` đã kẹp cả hai đầu) — **−2,5 phút**.
 2. Bỏ `vimedcss-test` (1.612 segment, suite lớn nhất) khỏi 3b, giữ `vimedcss-hard` —
    **−15 phút**. Mất một cột của bảng summit, nên là lựa chọn cuối.
 3. **Không bao giờ cắt 3a.** Đường cong retention là lý do lượt này tồn tại; nếu chỉ kịp
