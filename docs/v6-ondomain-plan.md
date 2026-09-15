@@ -214,3 +214,81 @@ cột v5) + paired bootstrap dCER với Scribe trên đúng 299 segment.
 
 Cộng dựng máy, tải corpus, chép kết quả về: **thuê 5 h**. Nếu chạy thêm lượt 101 h của
 professor (+80 phút train, +23 phút eval) thì thuê 7 h.
+
+---
+
+## 8. Kết quả (2026-09-15, H200 thuê, commit `39aab1d`)
+
+Cả hai lượt chạy hết, `EXIT=0`. **Không lượt nào qua cổng.** Artifact:
+`Outputs/v6-ondomain-15h.zip`, `Outputs/v6-ondomain-29h.zip`, metrics và audit đã giải nén
+sẵn ở `Outputs/v6-ondomain-{15h,29h}/`, log ở `Outputs/v6-ondomain.run.log` và
+`Outputs/v6-ondomain-15h.sweep.log`.
+
+### 8.1 Train
+
+| | `-15h` | `-29h` |
+|---|---:|---:|
+| step | 1.317 | 2.157 |
+| ValCER tốt nhất | 0,0354 (step 1.100) | 0,0352 (step 1.800) |
+
+ValCER hai bên gần như trùng nhau — và **không đọc được gì từ nó**. Val nằm trong phân phối
+v6 nên không thấy được chênh lệch cross-domain, vốn lệch hẳn (0,0875 vs 0,1101). Lượt sau
+đừng dùng ValCER để so hai corpus.
+
+### 8.2 Cross-domain (`dataset/cross-domain-bench`, 299 segment, 1.283 candidate)
+
+| hệ | cer | retention | no_loanword_cer |
+|---|---:|---:|---:|
+| ngưỡng (v5) | ≤ 0,0740 | ≥ 0,6648 | ≤ 0,0613 |
+| v6-100h (`v6-corpus`) | 0,1081 | 0,4864 | 0,0577 |
+| `-29h` λ=1,0 | 0,1101 | 0,5947 | 0,1083 |
+| `-15h` λ=1,0 | 0,0919 | 0,6157 | 0,0731 |
+| **`-15h` λ=0,75** | **0,0875** | **0,6189** | 0,0628 |
+| `-15h` λ=0,25 (elbow chọn) | 0,0926 | 0,5012 | 0,0575 |
+
+### 8.3 Đọc theo bảng §6
+
+Trúng dòng **`-15h` ≥ `-29h`**: giờ không phải đòn bẩy, lọc nguyên cuộc thắng quota ở mọi
+cột. Dòng `no_loanword_cer xấu đi` cũng nổ cho chế độ quota (`-29h` 0,1083 so với 0,0613)
+— bỏ hướng cắt segment, đúng như bảng đã đoán trước.
+
+Retention về ~62%, không phải ~56%, cũng không tới 75%. Lọc corpus theo mật độ từ ngoại lai
+đẩy retention từ 48,6% (100 h) lên 61,9% (15,5 h) — **hướng đúng, mức cải thiện lớn, vẫn
+thiếu 4,6 pp so với v5**. CER dư 1,35 pp. v5 giữ production.
+
+### 8.4 Hai phát hiện về cơ chế
+
+**λ đi ngược chiều dự đoán.** Chính base PhoWhisper-large mới là thứ nuốt từ ngoại lai
+(val retention 0,342 ở λ=0). Fine-tune v6 *dạy* được retention chứ không phá nó, nên λ càng
+nhỏ retention càng tệ:
+
+```
+λ      val_cer   ood_cer   val_retention
+0,0    0,1024    0,0226    0,3422
+0,25   0,0544    0,0227    0,6811
+0,5    0,0382    0,0257    0,8051
+0,75   0,0333    0,0315    0,8461
+1,0    0,0364    0,0405    0,8394
+```
+
+**`select_lambda` chọn λ=0,25 — tệ hơn λ=0,75 ở cả cer lẫn retention.** Elbow rule tối ưu
+val_cer/ood_cer, mù với retention vì `sweep.retention_floor: null`. Cùng đúng lỗi đã buộc
+v5 phải override tay sang λ=0,75 (`experiments/v4-mixed-r16-lambda0.75/README.md`). Lượt
+sau đặt `sweep.retention_floor` (≈0,80 theo bảng trên) thay vì override tay.
+
+Số λ=0,75 đo bằng cách copy `checkpoints/best` rồi sửa `lora_alpha` 32 → 24 — λ chỉ nằm ở
+`lora_alpha`, `lora_B` bit-identical ở mọi λ (`src/lora.py:save_with_lambda`).
+
+### 8.5 In-domain thì mô hình học rất tốt
+
+Gate tier1 và tier2 pass hết ở λ=0,25: in-domain CER 0,0559 (bound 0,0841), OOD 0,0227
+(bound 0,0426), cả youtube lẫn synthetic đều `IMPROVED`. Retention in-domain tăng mạnh so
+với baseline — youtube 0,365 → 0,716, synthetic 0,562 → 0,733.
+
+**Nên thất bại không nằm ở chỗ model không học được retention. Nó học tốt trên in-domain,
+nhưng không chuyển sang cross-domain bench.** Đây là câu hỏi cho lượt sau, không phải câu
+hỏi corpus density nữa — đòn bẩy dữ liệu theo hướng này đã cạn.
+
+Top từ bị nuốt trên bench (λ=0,25): `devops` 27, `jd` 26, `vinpearl` 24, `funnel` 15,
+`team` 14, `marketing` 14, `loyalty` 12, `acid` 11, `hunt` 10, `digital` 10, `uric` 10.
+Danh từ riêng và thuật ngữ ngành — không phải từ mượn phổ thông.
