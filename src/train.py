@@ -5,7 +5,10 @@ handoff). Smoke-test on Kaggle before trusting this against the deadline;
 the transformers 5.0.0 `Trainer(eval_dataset=dict)` multi-eval-set API this
 relies on has not been exercised in this repo yet.
 
-Checkpoint strategy: save to `checkpoints/best/` whenever `val_cer` improves.
+Checkpoint strategy: save to `checkpoints/best/` whenever `val_cer` improves,
+and to `checkpoints/step-<N>` every eval round plus once at the last step --
+retention is not in `val_cer`, so "best" is not knowable until the checkpoints
+are scored on cross-domain audio after the run (`docs/v6-100h-steps-plan.md`).
 An eval round is once per epoch by default, or every `training.eval_steps`
 steps when that is set -- see `_schedule_kwargs`. Early stopping: 3 eval-round
 patience, so the interval sets how much training a stop costs. OOD eval runs
@@ -361,6 +364,17 @@ def train(cfg, base_model, train_ds, val_ds, ood_ds, out_dir: str | Path,
                 model.save_pretrained(str(best_dir))
             if should_stop:
                 control.should_training_stop = True
+            return control
+
+        def on_train_end(self, args, state, control, model=None, **kwargs):
+            # The last eval round lands on the last multiple of eval_steps, not
+            # on the last step, leaving the tail with no adapter on disk at all
+            # -- the gap is the whole final epoch fragment when eval_steps is
+            # large. The last step is a point on the retention-vs-steps curve
+            # like every other eval round, and on an early stop it is the step
+            # training actually reached. Re-saves the same directory when the
+            # two coincide.
+            model.save_pretrained(str(out / "checkpoints" / f"step-{state.global_step}"))
             return control
 
     class TrainingDisplayCallback(TrainerCallback):
