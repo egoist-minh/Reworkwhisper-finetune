@@ -85,6 +85,10 @@ training:
                                        # UNSCALED adapter -- outputs/<run>/checkpoints/best,
                                        # never outputs/<run>/adapter (lambda is baked into
                                        # that one). cfg.lora is ignored when this is set
+  early_stopping_patience: 3          # stop after this many eval rounds with no ValCER
+                                       # improvement; null = never stop early (needed when
+                                       # the checkpoint is picked by something ValCER cannot
+                                       # see, e.g. cross-domain retention)
   eval_steps: null                    # eval + checkpoint every N steps; null = once per epoch.
                                        # Set it on any 1-epoch run: "epoch" then means a single
                                        # eval after the last step, no CER row while training is

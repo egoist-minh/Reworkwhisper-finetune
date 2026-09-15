@@ -251,7 +251,6 @@ OV="--override run_id=$R
     --override data.ood_eval_path=null
     --override data.val_meetings=[paid_meeting_0001,paid_meeting_0002,paid_meeting_0011,rCd8DSMk3-c,zlKBfNzfh50,coteccons-agm-2025,jB1P4bqLwDY]
     --override data.cross_domain_path=dataset/cross-domain-bench
-    --override training.epochs=3
     --override training.learning_rate=2.0e-4
     --override training.batch_size=16 --override training.grad_accum_steps=1
     --override training.gradient_checkpointing=false
