@@ -79,7 +79,8 @@ huggingface-cli download rework-whisper-v6-org/v6-corpus v6-corpus.tar \
     --repo-type dataset --local-dir .
 tar -xf v6-corpus.tar -C dataset
 rm -f v6-corpus.tar
-huggingface-cli download rework-whisper-v6-org/v6-corpus-addon v6-corpus-addon.tar \n    --repo-type dataset --local-dir .
+huggingface-cli download rework-whisper-v6-org/v6-corpus v6-corpus-addon.tar \
+    --repo-type dataset --local-dir .
 tar -xf v6-corpus-addon.tar -C dataset/v6-corpus
 rm -f v6-corpus-addon.tar
 echo FETCH_OK
@@ -153,7 +154,7 @@ print(len(tr), len(va), len(te))"
 
 ### 3.1b Add-on TTS — kiểm đã nằm đúng chỗ
 
-Tar add-on đóng **không có thư mục gốc**, nên nó bung thẳng vào `dataset/v6-corpus/` và
+Add-on là file thứ hai trong chính repo `v6-corpus`, đóng **không có thư mục gốc**, nên nó bung thẳng vào `dataset/v6-corpus/` và
 trộn cùng manifest sẵn có. Kiểm:
 
 ```bash
