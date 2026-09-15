@@ -66,7 +66,7 @@ pip install -q --upgrade pip && pip install -q huggingface_hub hf_transfer
 khoản dài nhất của cả lượt thuê, và phần cài đặt bên dưới không cần đợi nó:
 
 ```bash
-export HF_TOKEN=<token org rework-whisper-v6-org — cần quyền GHI, §8 đẩy adapter lên>
+export HF_TOKEN=<token `org_download`, đuôi HTgk — KHÔNG phải `write_dataset`>
 export HF_HUB_ENABLE_HF_TRANSFER=1
 mkdir -p ~/speech/Fine_tune_wf/dataset
 
@@ -79,7 +79,7 @@ huggingface-cli download rework-whisper-v6-org/v6-corpus v6-corpus.tar \
     --repo-type dataset --local-dir .
 tar -xf v6-corpus.tar -C dataset
 rm -f v6-corpus.tar
-huggingface-cli download winhsss/v6-corpus-addon v6-corpus-addon.tar \n    --repo-type dataset --local-dir .
+huggingface-cli download rework-whisper-v6-org/v6-corpus-addon v6-corpus-addon.tar \n    --repo-type dataset --local-dir .
 tar -xf v6-corpus-addon.tar -C dataset/v6-corpus
 rm -f v6-corpus-addon.tar
 echo FETCH_OK
@@ -92,9 +92,10 @@ Viết ra file rồi mới `tmux` chạy, không nhét lệnh vào chuỗi lồn
 + `python -c` là ba tầng nháy, sai một dấu là tải nhầm hoặc im lặng không chạy.
 `HF_TOKEN` đã export ở shell hiện tại nên script kế thừa được.
 
-Add-on nằm ở `winhsss/v6-corpus-addon`, **không** ở org — token `write_dataset` hiện tại
-là fine-grained chỉ scope user, tạo repo dưới `rework-whisper-v6-org` trả 403. Repo vẫn
-private; cùng token đọc được cả hai.
+Phải đúng token **`org_download`** (đuôi `HTgk`): nó có `repo.write` trên org
+`rework-whisper-v6-org`. Token `write_dataset` (đuôi `Wlax`) là fine-grained chỉ scope
+user, mọi thao tác ghi dưới org trả **403 Forbidden** — kể cả watcher ở §5 và
+`push_run_adapters` ở §8, chứ không riêng lượt tải này.
 
 `HF_HUB_ENABLE_HF_TRANSFER=1` đổi tầng tải sang backend Rust nhiều luồng; trên đường truyền
 nhanh nó là khác biệt lớn nhất của cả bảng ngân sách. `rm` ngay sau khi giải nén để không
