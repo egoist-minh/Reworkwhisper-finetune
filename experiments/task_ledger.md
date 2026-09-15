@@ -135,6 +135,47 @@ không thấy được đánh đổi này. Hai dòng λ=1,0/0,75 là rescore tay
 
 ---
 
+### v6-100h-steps (v6-corpus + add-on TTS, 42.794 seg / 106,69 h / 3,55% mật độ)
+
+- ngày: 2026-09-16 · máy H200 thuê theo giờ · commit `38f06e5`
+- rank/α: 16/32 · epoch 2 · LR 2e-4 · batch 16 × accum 1 · init_adapter: không
+- 5.350 bước, 88 phút (train 65 + eval 23), 0,730 giây/bước, đỉnh VRAM 77,1 GB
+- val mở rộng 7 cuộc / 1.179 seg: ValCER 0,1754 (b.1600) → 0,1542 (b.3200) → 0,1293
+  (b.4800), giảm đơn điệu, **chưa hội tụ** lúc dừng. Không so được với lượt cũ (val 4 cuộc)
+- không chạy `baseline`/`sweep-gate` · không có cổng tự động
+
+Đường cong retention theo số bước (`score_cross_domain_model`, batch 64, λ=1,0;
+`Outputs/v6-100h-steps-metrics/cross_domain.step-*.json`):
+
+| bước | 400 | **800** | 1200 | 1600 | 5350 |
+|---|---:|---:|---:|---:|---:|
+| cross-domain CER | 11,36% | 9,69% | 13,03% | 12,79% | 11,93% |
+| retention | 48,95% | **62,82%** | 47,70% | 48,25% | 46,30% |
+
+λ trên `step-800` (cùng đường đo): λ=0,75 → CER 8,80% / retention 61,18%; λ=0,5 →
+CER 8,77% / retention 57,29%. λ=0,5 bị λ=0,75 chi phối hoàn toàn.
+
+Bảng benchmark N3 (`Outputs/bench-merged-v6-100h/benchmark-table.N3.md`, CER %, so theo cột):
+
+| model | cross-domain | synthetic-test | vimedcss-hard | vimedcss-test | youtube-test |
+|---|---:|---:|---:|---:|---:|
+| `scribe_v2` | **6,25** | — | **13,22** | **11,19** | 6,44 |
+| v5 | 8,19 | **1,61** | 16,42 | 13,79 | **5,77** |
+| step-800 λ=1,0 | 9,67 | 2,41 | 20,94 | — | 8,31 |
+| step-800 λ=0,75 | 8,81 | — | — | — | — |
+| base | 13,32 | 4,26 | 19,43 | 15,38 | 15,92 |
+
+- **Kết luận:** đường cong retention **không giảm đơn điệu** — nó có đỉnh nhọn ở bước
+  800, đúng ngân sách bước của v5 (801), và tụt về ~47–48% ở mọi bước khác. Dự đoán của
+  `docs/v6-100h-steps-plan.md` §5 (`step-400` cao nhất, giảm đều) sai ở cả hai vế: 400
+  bước cho retention 48,95%, thấp hơn 800 bước tới 13,9 điểm. Nhưng `step-800` vẫn thua
+  v5 ở **cả bốn suite** nó chạy, ở mọi λ đã thử; nặng nhất là `vimedcss-hard` 20,94% —
+  *tệ hơn cả base model* (19,43%). Corpus 106 giờ ở điểm dừng tốt nhất của nó không
+  sinh ra model thay được v5.
+- **Đóng hướng:** "dừng sớm theo số bước" không phải đòn bẩy còn lại — đỉnh tồn tại
+  nhưng nằm đúng chỗ v5 đã đứng, và vẫn thấp hơn v5 5,1–7,3 điểm retention. Biến chưa
+  bị loại vẫn là **thành phần corpus** (nhãn máy so với người soát), đúng kết luận 2 ở dưới.
+
 ## Hai kết luận đóng hướng đi (không re-litigate, xem `docs/plan-cat-pipeline-va-so-thi-nghiem.md` §2.3)
 
 1. **Curriculum hai pha thua một pha.** `v6-dense-1/3/4` (nối từ
