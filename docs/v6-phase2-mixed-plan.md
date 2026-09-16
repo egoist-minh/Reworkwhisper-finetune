@@ -314,10 +314,10 @@ Nhánh A hợp lệ; nhánh LoRA tươi vẫn không, vì nó không chạm 100 
 Bộ chọn là **hai cuộc YouTube của split test — `3nuCdzuyqng` và `7B24A9GfHAo`,
 114 + 114 = 228 segment / 60,0 phút** (đếm lại tại chỗ trên manifest, cả
 `mixed-noisy-v1` lẫn `v6-corpus` đều ra 228, và không segment nào trong hai cuộc này
-bị QC đánh `bo`). Con số **214** ở bảng benchmark là số mà `scripts/benchmark_run.py`
-báo về trên cùng hai cuộc — chênh lệch đến từ đường decode cắt-30-giây-rồi-ghép của
-script đó, chứ không phải từ dữ liệu. §5 dùng `_eval_split`, nên n ở đây là 228, và
-ô YouTube test của bảng benchmark **không so thẳng được** với bảng chọn checkpoint. Lý do dùng nó thay vì `cross-domain-bench`: bộ nào vừa dùng để chọn vừa dùng
+bị QC đánh `bo`). `scripts/benchmark_run.py` cũng báo 228 trên cùng hai cuộc
+(`Outputs/benchmark-2026-09-10 (3)/benchmark-table.N3.md`), nên hai đường decode
+đồng ý về số segment. Con số **214** chỉ có ở bảng tay `Outputs/bang-tong-hop-*.csv`,
+là số cũ, và bảng đó đã được biết là trôi khỏi manifest — đừng trích từ nó. Lý do dùng nó thay vì `cross-domain-bench`: bộ nào vừa dùng để chọn vừa dùng
 để báo cáo thì số cuối không còn là ước lượng không thiên lệch, mà khoảng cách đang
 xét giữa v6 và v5 chỉ 0,63 điểm CER.
 
@@ -448,9 +448,10 @@ Không hạ ngưỡng để cho qua.
 | `--stage baseline` → `--stage prepare` | ~5 phút | **~0** |
 | train nhánh A (3 epoch → 2 epoch) | ~30 phút | **~20 phút** |
 | eval trong lúc train (`val_limit=64`) | ~15 phút | **~2 phút** |
-| chọn checkpoint + λ, một lần nạp model, batch 64 | ~52 phút | **~25 phút mỗi nhánh** |
+| chọn checkpoint + λ, một lần nạp model, batch 64 | ~52 phút | **~25 phút** |
 | gate cuối | ~10 phút | ~8 phút |
-| **tổng** | **~2 giờ 10** | **~1 giờ 25** |
+| benchmark 6 bộ, 3.985 segment (§8) | ~15 phút (chỉ ViMedCSS) | **~25 phút** |
+| **tổng** | **~2 giờ 10** | **~1 giờ 50** |
 
 Thuê ba giờ vẫn đúng: phần dư giờ đây đủ
 cho một lượt train lại **có thông tin** — ví dụ hạ về 1e-4 nếu ràng buộc
@@ -462,11 +463,107 @@ lại thay vì tin bảng này.
 
 ---
 
-## 8. Trước khi trả máy
+## 8. Benchmark — sáu bộ, cùng lượt thuê
 
-- Chép **`outputs/v6-phase2-mixed/`** đầy đủ về máy Windows. Đã mất một lượt đo vì chép muộn.
-- Đẩy 8 checkpoint lên HF bằng `scripts/push_checkpoints_live.py --once`. Không đẩy thì lượt
-  sau muốn chấm lại một bản khác phải train lại từ đầu.
-- Decode adapter thắng trên ViMedCSS hard + test trong cùng lượt thuê (~15 phút, 2.272
-  segment) để bảng benchmark đủ hàng.
+Gate ở §6 chỉ trả lời "có ship được không". Bảng benchmark trả lời "so với ai thì
+đứng đâu", và đó là thứ đi ra ngoài phòng kỹ thuật. Chạy trong cùng lượt thuê: trả
+máy rồi mới thiếu một hàng là phải thuê lại.
+
+**Ba model nền đã decode xong và đang nằm ở `Outputs/benchmark-2026-09-10 (3)/`** —
+`vinai_phowhisper_large`, `winhsss_reworkwhisper_large_v5`, `scribe_v2`. Không
+decode lại chúng: chép nguyên thư mục đó lên máy thuê, decode **một** model mới vào
+cùng thư mục, rồi `benchmark_report.py` dựng lại bảng cho cả bốn. Decode lại ba model
+nền là trả tiền GPU cho những con số đã có, và với `scribe_v2` là trả tiền API thật.
+
+| bộ | n | giờ | nguồn |
+|---|---:|---:|---|
+| `vimedcss-hard` | 658 | 1,38 | HF `tensorxt/ViMedCSS`, split `hard` |
+| `vimedcss-test` | 1.614 | 3,39 | HF `tensorxt/ViMedCSS`, split `test` |
+| `youtube-test` | 228 | 1,00 | manifest, `split=test` + `source=youtube` |
+| `synthetic-test` | 426 | 0,58 | manifest, `split=test` + `source=synthetic` |
+| `vivos` | 760 | — | `dataset/vivos` |
+| `cross-domain` | 299 | 1,30 | `dataset/cross-domain-bench` |
+| **tổng** | **3.985** | **~7,7** | |
+
+⚠ `youtube-test` ở đây là **228**, giống hệt §5 — `benchmark_run.py` và
+`_eval_split` đồng ý với nhau về số segment. Con số **214** chỉ xuất hiện ở bảng tay
+`Outputs/bang-tong-hop-*.csv`, và bảng đó đã được biết là trôi khỏi manifest. Dùng
+`benchmark-table.N3.md` làm nguồn, đừng dùng file CSV.
+
+### 8.1 Lệnh
+
+```bash
+# adapter thắng ở §5, đã bake lambda nếu lambda != 1,0, đặt ở một đường dẫn NGẮN và
+# ổn định: nó đi thẳng vào tên file output và là khoá resume.
+ADP=outputs/v6-phase2-adapter
+
+python -m scripts.benchmark_run --backend hf \
+    --model vinai/PhoWhisper-large --adapter $ADP \
+    --suites vimedcss-hard,vimedcss-test,youtube-test,synthetic-test,vivos,cross-domain \
+    --path youtube-test=dataset/v6-phase2 \
+    --path synthetic-test=dataset/v6-phase2 \
+    --path vivos=dataset/vivos \
+    --path cross-domain=dataset/cross-domain-bench \
+    --batch-size 64 \
+    --out "Outputs/benchmark-2026-09-10 (3)"
+
+python -m scripts.benchmark_report --dir "Outputs/benchmark-2026-09-10 (3)" \
+    --variant N3 --baseline vinai/PhoWhisper-large
+```
+
+Ba điều dễ sai:
+
+- **`--adapter` phải có mặt.** Tên file output là `slug(model+adapter)`, và
+  `done_ids()` resume theo đúng tên đó. Thiếu `--adapter`, output trùng tên với lượt
+  decode base model cũ, `benchmark_run` coi là "đã xong" và **báo cáo hypothesis của
+  base model như thể của adapter** — im lặng, không lỗi.
+- **`--path` trỏ `dataset/v6-phase2`** cho hai bộ manifest. Ba model nền decode trên
+  `mixed-noisy-v1`; đã đối chiếu: cả hai corpus cho đúng 228 segment YouTube từ
+  `3nuCdzuyqng` (114) và `7B24A9GfHAo` (114), và 426 segment synthetic từ
+  `paid_meeting_test_0001-0003`. Cùng audio, khác đường dẫn.
+- **Bộ `cross-domain` bị decode hai lần** — một lần ở §6 bằng `_eval_split` cho gate,
+  một lần ở đây bằng đường cắt-30-giây của `benchmark_run`. Cố ý: hai con số thuộc
+  hai đường decode và **không được trộn vào nhau**. Số gate lấy từ §6, số bảng lấy từ
+  `benchmark-table.N3.md`. Giá là ~2 phút decode 299 segment.
+
+### 8.2 Đọc kết quả
+
+`benchmark_report.py` in hai bảng: ma trận CER gọn và bảng chi tiết có khoảng tin cậy
+95% cộng loanword retention mỗi ô. So **dọc** một cột (cùng audio, khác model), không
+so ngang — sáu bộ khác độ khó.
+
+Mốc phải vượt, lấy từ bảng N3 hiện có (v5 là model đang chạy production):
+
+| bộ | v5 | PhoWhisper-large | scribe v2 |
+|---|---:|---:|---:|
+| `cross-domain` CER | **8,19** | 13,32 | 6,25 |
+| `cross-domain` retention | **66,64%** | 27,83% | 83,63% |
+| `youtube-test` CER | **5,77** | 15,92 | 6,44 |
+| `synthetic-test` CER | **1,61** | 4,26 | — |
+| `vimedcss-hard` CER | **16,42** | 19,43 | — |
+| `vimedcss-test` CER | **14,21** | 15,93 | — |
+| `vivos` CER | 3,34 | **2,28** | — |
+
+⚠ Hàng `vivos` của N0 từng cho 81% CER và đó là **hiện tượng giả do chữ hoa** —
+reference VIVOS viết ALL-CAPS còn hypothesis viết thường. N3 đã chuẩn hoá nên số ở
+trên dùng được; đừng trích hàng VIVOS từ `benchmark-table.N0.md`.
+
+⚠ Bốn cột ViMedCSS trong `bang-tong-hop-*.csv` dùng chuẩn hoá khác bench này, ghi rõ
+ngay trong file đó là **không so trực tiếp được**. Chỉ trích từ `benchmark-table.N3.md`.
+
+Chi phí: 3.985 segment ở batch 64. Neo duy nhất đang có là ~15 phút cho 2.272 segment
+ViMedCSS ở batch 8, nên ~25 phút là ước lượng thô — **đo bộ đầu tiên rồi suy ra phần
+còn lại** thay vì tin con số này. `benchmark_run` resume theo `segment_id`, nên đứt
+giữa chừng chỉ mất phần chưa xong.
+
+---
+
+## 9. Trước khi trả máy
+
+- Chép **`outputs/v6-phase2-mixed/`** và **`Outputs/benchmark-2026-09-10 (3)/`** đầy
+  đủ về máy Windows. Đã mất một lượt đo vì chép muộn.
+- Đẩy 8 checkpoint lên HF bằng `scripts/push_checkpoints_live.py --once`. Không đẩy
+  thì lượt sau muốn chấm lại một bản khác phải train lại từ đầu.
 - Ghi `experiments/task_ledger.md` và `provenance.md`.
+- Cập nhật `Outputs/bang-tong-hop-*.csv` **từ** `benchmark-table.N3.md`, không gõ tay
+  từ trí nhớ — đó là cách file CSV đó trôi khỏi manifest ngay từ đầu.
