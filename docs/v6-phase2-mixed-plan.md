@@ -301,11 +301,11 @@ tươi, mọi cấu hình khởi từ adapter train trên corpus loãng đều d
 vào `v6-corpus` ở bất kỳ đâu, nên kết quả không được duyệt dù có thắng. Ghi lại ở
 đây để lượt sau không đề xuất lại.
 
-⚠ Nhánh A thoả ràng buộc đó **qua `init_adapter`**, không phải qua corpus nó train:
-run pha 2 chỉ thấy 15,73 giờ. 100 giờ đi vào model qua adapter `step-800` của
-`v6-100h-steps`. Nếu người duyệt hiểu ràng buộc là "lượt train cuối phải chạy trên
-100 giờ" thì nhánh A cũng không thoả, và cả kế hoạch này phải bàn lại từ §1 —
-xác nhận cách hiểu trước khi thuê máy.
+Nhánh A thoả ràng buộc đó **qua `init_adapter`**, không phải qua corpus nó train:
+run pha 2 chỉ thấy 15,73 giờ, còn 100 giờ đi vào model qua adapter `step-800` của
+`v6-100h-steps`. Cách hiểu này **đã được xác nhận ngày 16/09/2026**: ràng buộc là
+"đã từng train trên 100 giờ", không phải "lượt train cuối phải chạy trên 100 giờ".
+Nhánh A hợp lệ; nhánh LoRA tươi vẫn không, vì nó không chạm 100 giờ ở bất kỳ đâu.
 
 ---
 
