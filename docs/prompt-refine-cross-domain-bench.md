@@ -26,12 +26,17 @@ Ra hai file:
 
 | file | nội dung | ai được xem |
 |---|---|---|
-| `Outputs/cross-domain-refine-input.jsonl` | 299 bản ghi: 2 segment trước, 2 segment sau, 5 bản đọc gắn nhãn A–E | đưa cho phiên soát |
+| `Outputs/cross-domain-refine-input.jsonl` | 299 bản ghi: 2 segment trước, 2 segment sau, 4 bản đọc gắn nhãn A–D | đưa cho phiên soát |
 | `Outputs/cross-domain-refine-key.json` | reference thật + bản đồ chữ cái → tên hệ | **giữ lại**, chỉ dùng ở bước đối chiếu |
 
-Nhãn A–E xáo lại riêng cho từng segment (114 hoán vị khác nhau trên 299 segment), nên không hệ
-nào mang theo danh tiếng của nó sang bản ghi kế tiếp. Người soát không biết đâu là v5, đâu là
-Scribe, đâu là model đang được chấm.
+Bốn bản đọc là bốn model khác nhau — mỗi model đúng một phiếu. Lượt train vừa rồi sinh ra hai
+cột (λ=1,0 và λ=0,75) từ cùng một checkpoint; giữ cả hai là cho một model hai phiếu tương quan,
+làm cùn đúng thứ người soát dựa vào là chỗ các bản đọc thật sự phân kỳ. Cột giữ lại là λ=0,75,
+bản tốt hơn trên chính bench này (CER 8,81% so với 9,67%).
+
+Nhãn A–D xáo lại riêng cho từng segment (đủ cả 24 hoán vị), nên không hệ nào mang theo danh
+tiếng của nó sang bản ghi kế tiếp. Người soát không biết đâu là v5, đâu là Scribe, đâu là model
+đang được chấm.
 
 ---
 
@@ -48,7 +53,7 @@ sống sót qua một lượt người soát, nên lượt này không được 
 - `segment_id`, `meeting_id`, `position` (thứ tự trong cuộc), `duration_s`
 - `truoc` — transcript của 2 segment liền trước
 - `sau` — transcript của 2 segment liền sau
-- `ban_doc` — 5 bản đọc của segment này do 5 hệ ASR khác nhau sinh ra, gắn nhãn A–E
+- `ban_doc` — 4 bản đọc của segment này do 4 hệ ASR khác nhau sinh ra, gắn nhãn A–D
 
 Ba cuộc họp, người Việt nói chuyện tự nhiên, code-switch dày: `IGZYBrbDUEw` (tuyển dụng, nghề
 tech), `z-nODwLyhA0` (digital marketing, SEO), `ySdJ3sg_2lk`.
@@ -56,22 +61,22 @@ tech), `z-nODwLyhA0` (digital marketing, SEO), `ySdJ3sg_2lk`.
 ## Những gì bạn không có, và phải xử sự đúng với việc đó
 
 **Không có audio.** Bạn không nghe được câu này. Mọi phán đoán dựa trên: ngữ cảnh hai đầu, sự
-khác biệt giữa 5 bản đọc, và kiến thức của bạn về tiếng Việt cùng thuật ngữ của ngành đang nói.
+khác biệt giữa 4 bản đọc, và kiến thức của bạn về tiếng Việt cùng thuật ngữ của ngành đang nói.
 
 **Không có transcript cũ.** Bạn không được đi tìm nó trong repo — không mở
 `dataset/cross-domain-bench/`, không mở `Outputs/cross-domain-refine-key.json`, không mở các file
 `*.persegment.jsonl` (chúng chứa cột `ref`). Nếu bạn vô tình thấy nó, dừng lại và báo, đừng tiếp
 tục segment đó.
 
-**Nhãn A–E vô nghĩa.** Chúng xáo lại ở mỗi segment. "Hệ A đáng tin" là một câu vô nghĩa ở đây.
+**Nhãn A–D vô nghĩa.** Chúng xáo lại ở mỗi segment. "Hệ A đáng tin" là một câu vô nghĩa ở đây.
 
 ## Việc phải làm, với mỗi segment
 
 Viết ra bản đọc mà bạn tin là ĐÚNG với những gì người nói đã nói. Không phải bản hay nhất,
 không phải bản dễ đọc nhất — bản đúng nhất.
 
-Cách làm: đọc `truoc` và `sau` trước để nắm mạch chuyện và chủ đề. Rồi đọc cả 5 bản trong
-`ban_doc`, tìm chỗ chúng khác nhau. Chỗ 5 bản giống nhau thì gần như chắc chắn đúng, chép lại.
+Cách làm: đọc `truoc` và `sau` trước để nắm mạch chuyện và chủ đề. Rồi đọc cả 4 bản trong
+`ban_doc`, tìm chỗ chúng khác nhau. Chỗ 4 bản giống nhau thì gần như chắc chắn đúng, chép lại.
 Chỗ chúng khác nhau là nơi cần bạn quyết, và căn cứ để quyết là:
 
 - **Mạch chuyện**: cuộc này đang nói về gì, câu trước dẫn tới đâu, câu sau nối tiếp thế nào.
@@ -79,13 +84,13 @@ Chỗ chúng khác nhau là nơi cần bạn quyết, và căn cứ để quyế
   bản phiên âm của một hệ nghe không ra. Trong một câu về tuyển dụng, `jd` là thật.
 - **Ngữ pháp và độ trôi chảy của tiếng Việt nói**.
 
-Không bỏ phiếu theo đa số. Bốn hệ cùng sai một chỗ là chuyện thường — chúng cùng học từ dữ
-liệu giống nhau. Một bản lẻ loi đúng thì nó đúng.
+Không bỏ phiếu theo đa số. Ba hệ cùng sai một chỗ là chuyện thường — chúng cùng học từ dữ liệu
+giống nhau. Một bản lẻ loi đúng thì nó đúng.
 
 ## Từ ngoại lai — trọng tâm của cả lượt này
 
 Bộ benchmark này tồn tại để đo một thứ: model có giữ nguyên chữ của từ ngoại lai hay phiên âm
-nó thành âm tiết Việt. Nên chỗ 5 bản đọc khác nhau ở một từ ngoại lai là chỗ quan trọng nhất
+nó thành âm tiết Việt. Nên chỗ 4 bản đọc khác nhau ở một từ ngoại lai là chỗ quan trọng nhất
 trong toàn bộ công việc này.
 
 Quy tắc: **viết từ ngoại lai bằng chính chữ của nó** khi người nói đang dùng chính từ đó —
@@ -106,7 +111,7 @@ thật:
 
 - **Chữ thường toàn bộ.** Không viết hoa tên riêng, không viết hoa đầu câu.
 - **Không dấu câu.** Không phẩy, không chấm, không hỏi chấm.
-- **Giữ nguyên từ đệm và lặp**: `ờ`, `à`, `á`, `cái cái cái` là lời nói thật. Các bản đọc A–E
+- **Giữ nguyên từ đệm và lặp**: `ờ`, `à`, `á`, `cái cái cái` là lời nói thật. Các bản đọc A–D
   có thể đã bỏ chúng — bạn thì không được bỏ, nếu ngữ cảnh cho thấy người nói có nói.
 - **Số viết bằng chữ số**: `4 5 năm`, `30 giây`, `1 phút`. (Khâu chuẩn hoá của dự án sẽ quy về
   một dạng, nên đây không phải chỗ quyết định — đừng dừng lại lâu ở nó.)
@@ -122,7 +127,7 @@ Một file JSONL `Outputs/cross-domain-refine-output.jsonl`, mỗi segment một
  "ghi_chu": "<chỉ khi có gì đáng nói, để trống nếu không>"}
 
 `do_tin_cay` nói về **cả segment**:
-- `cao` — 5 bản gần như thống nhất, hoặc chỗ khác nhau được ngữ cảnh giải quyết dứt khoát.
+- `cao` — 4 bản gần như thống nhất, hoặc chỗ khác nhau được ngữ cảnh giải quyết dứt khoát.
 - `vua` — có chỗ bạn phải chọn, và bạn chọn được có lý do, nhưng không loại trừ hẳn khả năng khác.
 - `thap` — các bản đọc phân kỳ nặng, ngữ cảnh không cứu được, cần nghe audio mới biết.
 
@@ -136,7 +141,7 @@ liều — bước sau sẽ lọc theo chính trường này.
 - Đừng bỏ qua segment nào. Đủ 299 dòng, kể cả những segment bạn thấy tầm thường — segment nhìn
   tầm thường vẫn có thể chứa đúng một từ ngoại lai bị phiên âm, và đó là thứ cần tìm.
 - Đừng "làm sạch" câu nói: không sửa ngữ pháp người nói, không bỏ lặp, không rút gọn.
-- Đừng viết một bản dung hoà giữa 5 bản đọc. Chọn cái đúng, không trộn.
+- Đừng viết một bản dung hoà giữa 4 bản đọc. Chọn cái đúng, không trộn.
 ```
 
 ---
@@ -154,8 +159,8 @@ Ghép `Outputs/cross-domain-refine-output.jsonl` với `Outputs/cross-domain-ref
 
 Hai điều cần biết khi đọc kết quả:
 
-**Bản dựng mù không phải chân lý.** Nó được dựng từ output của chính những hệ đang được chấm,
-cộng ngữ cảnh. Chỗ nó khác reference là chỗ **đáng nghe lại**, không phải chỗ reference sai.
+**Bản dựng mù không phải chân lý.** Nó được dựng từ output của bốn hệ, một trong số đó là chính
+model đang được chấm, cộng ngữ cảnh. Chỗ nó khác reference là chỗ **đáng nghe lại**, không phải chỗ reference sai.
 Chốt bằng tai người, trên audio, rồi mới sửa.
 
 **Đừng sửa `manifest.*.jsonl` tại chỗ.** Bench cũ phải giữ nguyên để so được với mọi số đã công

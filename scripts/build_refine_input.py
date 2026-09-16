@@ -22,11 +22,15 @@ import zipfile
 from collections import defaultdict
 from pathlib import Path
 
+# One reading per model. The run's two v6 columns are the same checkpoint at two
+# lambdas, so carrying both would hand one model two correlated votes and blunt the
+# signal the refiner works from -- where the readings genuinely diverge. Lambda 0.75
+# is the one kept: it is the better of the two on this bench (8.81% CER against
+# 9.67%, docs/v6-100h-steps-plan.md and the task ledger).
 SYSTEMS = {
     "v5": "winhsss_reworkwhisper_large_v5",
     "base": "vinai_phowhisper_large",
     "scribe": "scribe_v2",
-    "v6_l100": "vinai_phowhisper_large_outputs_v6_100h_steps_checkpoints_step_800",
     "v6_l075": "vinai_phowhisper_large_tmp_step800_lam0_75",
 }
 CONTEXT = 2  # segments either side
