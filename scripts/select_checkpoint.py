@@ -26,11 +26,11 @@ from pathlib import Path
 
 
 def pick_best(rows: list[dict]) -> dict:
-    """The pre-committed rule: highest retention wins, ties go to the lower CER,
+    """The pre-committed rule: lowest CER wins, ties go to the higher retention,
     then to the earlier step. Module-level and tested (tests/test_select_checkpoint.py)
     rather than eyeballed off the printed table -- a rule read off a table after
     seeing it is a rule that can follow the numbers."""
-    return min(rows, key=lambda r: (-r["retention"], r["cer"], r["step"]))
+    return min(rows, key=lambda r: (r["cer"], -r["retention"], r["step"]))
 
 
 def main() -> None:

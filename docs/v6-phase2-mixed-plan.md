@@ -364,11 +364,18 @@ python -m scripts.select_checkpoint --run-dir outputs/$R \
     --out outputs/$R/metrics/selection-lambda.json
 ```
 
-Tiêu chí — **retention cao nhất; hoà thì CER thấp hơn; vẫn hoà thì step nhỏ hơn** —
+Tiêu chí — **CER thấp nhất; hoà thì retention cao hơn; vẫn hoà thì step nhỏ hơn** —
 nằm trong `scripts/select_checkpoint.py` chứ không đọc bằng mắt từ bảng, để quy tắc
 không thể chạy theo số sau khi đã nhìn thấy số. Tiền lệ cho bước 2: v5 ship ở
 λ=0,75, và λ cao kéo retention **lên** chứ không xuống — nhưng đừng ghim 0,75 sẵn,
 đó là tham số đã tối ưu cho corpus khác.
+
+⚠ **Đã đổi từ bản trước (retention cao nhất trước).** Chọn theo CER trước không
+bỏ qua retention hoàn toàn — gate ở §6 vẫn chặn cứng retention ≥66,48% trước khi
+đẩy HF — nhưng vì retention dao động mạnh theo step (đường cong pha 1: step-400
+48,95% · step-800 62,82% · step-1200 47,70%) còn bước 2 chỉ tinh chỉnh λ trên
+đúng step đã thắng ở bước 1, chọn nhầm step ở bước 1 thì bước 2 không cứu lại
+được. Rủi ro: tốn một lượt train nếu step thắng theo CER rớt gate retention.
 
 Hai điểm khiến bản này rẻ hơn và sạch hơn bản trước:
 
